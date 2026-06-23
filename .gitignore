@@ -1,0 +1,19 @@
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+
+### IntelliJ IDEA ###
+.idea/
+*.iws
+*.iml
+*.ipr
+
+### Kotlin ###
+.kotlin
+
+### VS Code ###
+.vscode/
+
+### claude
+.claude/

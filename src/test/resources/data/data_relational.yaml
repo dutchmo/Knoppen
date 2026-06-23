@@ -1,0 +1,308 @@
+# ============================================================
+# Data file: users, post, post_tag, audit_log, post_approval
+#
+# Tables appear in strict dependency order so that
+# FOREIGN_CYCLE generators can resolve parent values:
+#
+#   1. users          (no FK deps)
+#   2. post           (FK → users)
+#   3. post_tag       (FK → post, tag)
+#   4. audit_log      (FK → users, post  — FOREIGN_CYCLE, TIMESTAMP_OFFSET)
+#   5. post_approval  (FK → post, users  — FOREIGN_CYCLE, compound unique conflict)
+#
+# NOTE: tag rows are in data_tag.yaml (standalone).
+#       post_tag references tag IDs 1–4 defined there.
+#       Both files must be loaded before this one.
+# ============================================================
+
+tables:
+
+  # ──────────────────────────────────────────────
+  # users
+  # Exercises:
+  #   - ON CONFLICT UPDATE with excludeFromUpdate
+  #   - LITERAL default  (source)
+  #   - FUNCTION default (createTs)
+  #   - EXPRESSION default (metadata)
+  #   - enum constraint (type)
+  #   - temporal constraint (approvedTs) — one intentionally bad row flagged below
+  #   - ON CONFLICT on username unique key
+  # ──────────────────────────────────────────────
+  users:
+    - id: 1
+      username: "alice"
+      type: "ADMIN"
+      approvedTs: "2023-06-01 09:00:00+00"
+      # source   → LITERAL default  → 'Knoppen'
+      # createTs → FUNCTION default → CURRENT_TIMESTAMP
+      # metadata → EXPRESSION default → '[]'::jsonb
+
+    - id: 2
+      username: "bob"
+      type: "SUPERVISOR"
+      approvedTs: "2022-11-15 14:30:00+00"
+
+    - id: 3
+      username: "carol"
+      type: "USER"
+      approvedTs: "2024-01-10 08:00:00+00"
+
+    - id: 4
+      username: "dave"
+      type: "USER"
+      # approvedTs omitted — nullable, no constraint triggered
+
+    - id: 5
+      username: "eve"
+      type: "SUPERVISOR"
+      approvedTs: "2023-03-20 12:00:00+00"
+      source: "ManualEntry"      # overrides LITERAL default
+
+    # ── ON CONFLICT UPDATE exercise ───────────────────────
+    # id: 2 already exists. Action is UPDATE.
+    # createTs must NOT change (excludeFromUpdate).
+    # type and approvedTs will be updated.
+    - id: 2
+      username: "bob"
+      type: "ADMIN"              # was SUPERVISOR — should update
+      approvedTs: "2025-01-01 10:00:00+00"
+
+    # ── Temporal constraint violation (notPast: -P4Y) ─────
+    # approvedTs is more than 4 years in the past.
+    # This row SHOULD fail validation.
+    # Expected error: temporal constraint "notPast" violated on column approvedTs
+    - id: 6
+      username: "frank"
+      type: "USER"
+      approvedTs: "2019-01-01 00:00:00+00"   # BAD: > 4 years ago — validation must reject this
+
+
+  # ──────────────────────────────────────────────
+  # post
+  # Exercises:
+  #   - FK → users (user_id must exist in users rows above)
+  #   - ON CONFLICT UPDATE with excludeFromUpdate (user_id preserved)
+  #   - SEQUENCE generator (column_order)
+  #   - pattern constraint (title)
+  # ──────────────────────────────────────────────
+  post:
+    - id: 100
+      user_id: 1
+      title: "Introduction to PostgreSQL"
+      percent_approved: 95.00
+      # column_order generated: 10
+
+    - id: 101
+      user_id: 2
+      title: "Advanced Indexing Strategies"
+      percent_approved: 87.50
+      # column_order generated: 20
+
+    - id: 102
+      user_id: 1
+      title: "JSON and JSONB in Postgres"
+      percent_approved: 91.25
+      # column_order generated: 30
+
+    - id: 103
+      user_id: 3
+      title: "Getting Started with SQL"
+      percent_approved: 78.00
+      # column_order generated: 40
+
+    - id: 104
+      user_id: 5
+      title: "Query Optimization Tips"
+      percent_approved: 88.75
+      # column_order generated: 50
+
+    # ── ON CONFLICT UPDATE exercise ───────────────────────
+    # id: 101 already exists.
+    # percent_approved will be updated.
+    # user_id must NOT change (excludeFromUpdate).
+    # title will be updated.
+    - id: 101
+      user_id: 9999             # ignored — user_id is in excludeFromUpdate
+      title: "Advanced Indexing Strategies - Revised"
+      percent_approved: 92.00
+      # column_order generated: 60 (new value for this upsert — will update)
+
+
+  # ──────────────────────────────────────────────
+  # post_tag
+  # Exercises:
+  #   - Compound PK (post_id, tag_id)
+  #   - Compound FK → post AND → tag
+  #   - ON CONFLICT DO NOTHING
+  #   - SEQUENCE generator (column_order)
+  #   - Duplicate compound PK row to prove DO NOTHING fires
+  # ──────────────────────────────────────────────
+  post_tag:
+    - post_id: 100
+      tag_id: 1
+      # column_order generated: 10
+
+    - post_id: 100
+      tag_id: 2
+      # column_order generated: 20
+
+    - post_id: 101
+      tag_id: 1
+      # column_order generated: 30
+
+    - post_id: 102
+      tag_id: 3
+      # column_order generated: 40
+
+    - post_id: 103
+      tag_id: 4
+      # column_order generated: 50
+
+    - post_id: 104
+      tag_id: 1
+      # column_order generated: 60
+
+    - post_id: 104
+      tag_id: 2
+      # column_order generated: 70
+
+    # ── ON CONFLICT DO NOTHING exercise ───────────────────
+    # (post_id: 100, tag_id: 1) already exists above.
+    # This row must be silently skipped.
+    - post_id: 100
+      tag_id: 1
+      # column_order generated: 80 (discarded — DO NOTHING)
+
+
+  # ──────────────────────────────────────────────
+  # audit_log
+  # Exercises:
+  #   - ON CONFLICT DO NOTHING (append-only)
+  #   - TIMESTAMP_OFFSET generator (event_ts — stepping back 6h per row)
+  #   - FOREIGN_CYCLE generator: user_id cycles through users.id [1..5]
+  #   - FOREIGN_CYCLE generator: post_id cycles through post.id [100..104]
+  #   - Nullable FK columns (user_id, post_id may be null for system events)
+  #   - Duplicate PK to prove DO NOTHING fires
+  # ──────────────────────────────────────────────
+  audit_log:
+    - id: 1000
+      event: "USER_CREATED"
+      user_id: 1
+      # post_id omitted — nullable
+      notes: "Bootstrap insert — alice"
+      # event_ts generated: now - 0h  (rowIndex 0)
+
+    - id: 1001
+      event: "USER_CREATED"
+      user_id: 2
+      notes: "Bootstrap insert — bob"
+      # event_ts generated: now - 6h  (rowIndex 1)
+
+    - id: 1002
+      event: "POST_CREATED"
+      post_id: 100
+      # user_id generated: FOREIGN_CYCLE(users, id) → 1
+      notes: "Post 100 created"
+      # event_ts generated: now - 12h (rowIndex 2)
+
+    - id: 1003
+      event: "POST_CREATED"
+      post_id: 101
+      # user_id generated: FOREIGN_CYCLE(users, id) → 2
+      notes: "Post 101 created"
+      # event_ts generated: now - 18h (rowIndex 3)
+
+    - id: 1004
+      event: "POST_UPDATED"
+      post_id: 101
+      # user_id generated: FOREIGN_CYCLE(users, id) → 3
+      notes: "Post 101 revised title and approval score"
+      # event_ts generated: now - 24h (rowIndex 4)
+
+    - id: 1005
+      event: "POST_APPROVED"
+      post_id: 102
+      # user_id generated: FOREIGN_CYCLE(users, id) → 4
+      # event_ts generated: now - 30h (rowIndex 5)
+
+    - id: 1006
+      event: "POST_REJECTED"
+      post_id: 103
+      # user_id generated: FOREIGN_CYCLE(users, id) → 5
+      # event_ts generated: now - 36h (rowIndex 6)
+
+    - id: 1007
+      event: "POST_APPROVED"
+      post_id: 104
+      # user_id generated: FOREIGN_CYCLE(users, id) → 1 (wraps)
+      # event_ts generated: now - 42h (rowIndex 7)
+
+    # ── ON CONFLICT DO NOTHING exercise ───────────────────
+    # id: 1002 already exists.
+    # This row must be silently skipped — log is immutable.
+    - id: 1002
+      event: "POST_UPDATED"
+      post_id: 100
+      notes: "THIS_SHOULD_NOT_APPEAR"
+      # event_ts generated: now - 48h (discarded — DO NOTHING)
+
+
+  # ──────────────────────────────────────────────
+  # post_approval
+  # Exercises:
+  #   - ON CONFLICT on compound UNIQUE (post_id, approver_id) — NOT the PK
+  #   - excludeFromUpdate: decided_ts preserved on conflict
+  #   - FOREIGN_CYCLE: post_id cycles through post.id [100..104]
+  #   - FOREIGN_CYCLE: approver_id cycles through users.id [1..5]
+  #     (all users can be approvers here for coverage)
+  #   - SEQUENCE generator (column_order)
+  #   - Conflict row that updates decision but preserves decided_ts
+  # ──────────────────────────────────────────────
+  post_approval:
+    - id: 2000
+      post_id: 100
+      approver_id: 2
+      decision: "APPROVED"
+      decided_ts: "2025-02-01 10:00:00+00"
+      # column_order generated: 10
+
+    - id: 2001
+      post_id: 101
+      approver_id: 2
+      decision: "REJECTED"
+      decided_ts: "2025-02-02 11:00:00+00"
+      # column_order generated: 20
+
+    - id: 2002
+      post_id: 102
+      approver_id: 5
+      decision: "APPROVED"
+      decided_ts: "2025-02-03 09:30:00+00"
+      # column_order generated: 30
+
+    - id: 2003
+      post_id: 103
+      approver_id: 5
+      decision: "ABSTAINED"
+      decided_ts: "2025-02-04 14:00:00+00"
+      # column_order generated: 40
+
+    - id: 2004
+      post_id: 104
+      approver_id: 2
+      decision: "APPROVED"
+      decided_ts: "2025-02-05 16:00:00+00"
+      # column_order generated: 50
+
+    # ── ON CONFLICT on compound unique exercise ────────────
+    # (post_id: 101, approver_id: 2) matches row id: 2001.
+    # Conflict target is (post_id, approver_id) — not id.
+    # decision WILL be updated (REJECTED → APPROVED).
+    # decided_ts WILL NOT change (excludeFromUpdate).
+    # id WILL NOT change (excludeFromUpdate).
+    - id: 9999                  # ignored — id is in excludeFromUpdate
+      post_id: 101
+      approver_id: 2
+      decision: "APPROVED"      # updated from REJECTED
+      decided_ts: "2099-01-01 00:00:00+00"  # ignored — decided_ts is in excludeFromUpdate
+      # column_order generated: 60 (will update — not excluded)

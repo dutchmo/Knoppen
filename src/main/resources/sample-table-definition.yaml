@@ -1,0 +1,144 @@
+# Upsert Validation Schema
+# ============================================================
+# Purpose: Data validation and constraint definitions for
+#          generating PostgreSQL upsert statements.
+#          This is NOT used for DDL generation.
+#
+# Usage:   Actual data is provided as separate YAML files.
+#          This schema validates that data before upsert.
+#
+# Note:    A JSON Schema for validating this YAML structure
+#          itself will be produced separately.
+# ============================================================
+
+dialect: postgresql
+schema: code_sample
+
+validation:
+  defaultNullable: true       # All columns are nullable unless a "required" constraint is present
+  strictFields: true          # Unknown fields in data files will cause validation to FAIL
+
+
+tables:
+
+  # ──────────────────────────────────────────────
+  # TABLE: users
+  # ──────────────────────────────────────────────
+  - tableName: users           # "users" (plural) — avoids PostgreSQL reserved word "user"
+    description: "Users in the system"
+    primaryKey: [id]
+
+    # Defines behavior when an INSERT conflicts with an existing row.
+    # "target" defaults to primaryKey if omitted, but is explicit here for clarity.
+    onConflict:
+      target: [id]             # Column(s) used in ON CONFLICT (...) clause
+      action: update           # Emit DO UPDATE SET ... (use "doNothing" for DO NOTHING)
+      excludeFromUpdate:       # These columns are never overwritten during a conflict update
+        - id                   # Never overwrite the PK
+        - createTs             # Preserve original creation timestamp on update
+
+    columns:
+      - name: id
+        type: INTEGER
+        constraints:
+          - type: required
+
+      - name: source
+        type: VARCHAR(30)
+        default:
+          type: LITERAL          # A plain string literal value
+          value: "Knoppen"
+        constraints:
+          - type: pattern
+            regex: "^[A-Za-z0-9_]+$"
+            message: "source must be alphanumeric with underscores only"
+
+      - name: type
+        type: VARCHAR(30)
+        constraints:
+          - type: enum
+            values: ["USER", "SUPERVISOR", "ADMIN"]
+            message: "type must be one of USER, SUPERVISOR, ADMIN"
+
+      - name: createTs
+        type: TIMESTAMP
+        default:
+          type: FUNCTION         # SQL function — rendered unquoted (e.g. DEFAULT CURRENT_TIMESTAMP)
+          value: CURRENT_TIMESTAMP
+          # args: []             # Optional: use args if the function requires parameters
+
+      - name: approvedTs
+        type: TIMESTAMP
+        constraints:
+          - type: temporal
+            notFuture: true
+            # ISO 8601 duration — relative to validation runtime.
+            # "P4Y" means "no more than 4 years in the past".
+            # Update this value if the business rule window changes.
+            notPast: "-P4Y"
+
+      - name: username
+        type: VARCHAR(255)
+        constraints:
+          - type: required
+          - type: unique
+            conflictTarget: true   # This unique constraint drives ON CONFLICT target for username-based upserts
+          - type: pattern
+            regex: "^[a-zA-Z0-9_]{3,50}$"
+            message: "username must be 3–50 alphanumeric characters or underscores"
+
+      - name: metadata
+        type: JSONB
+        default:
+          type: EXPRESSION       # Arbitrary SQL expression — rendered unquoted and as-is
+          value: "'[]'::jsonb"   # Empty JSON array cast to JSONB
+
+
+  # ──────────────────────────────────────────────
+  # TABLE: post
+  # ──────────────────────────────────────────────
+  - tableName: post
+    primaryKey: [id]
+
+    onConflict:
+      target: [id]
+      action: update
+      excludeFromUpdate:
+        - id
+        - user_id                # FK relationship should not shift after initial insert
+
+    columns:
+      - name: id
+        type: INTEGER            # Standardized to INTEGER (alias of INT in PostgreSQL)
+        constraints:
+          - type: required
+
+      - name: user_id
+        type: INTEGER
+        foreignKey:
+          schema: code_sample    # Explicit schema qualification; inherits from top-level "schema" if omitted
+          table: users           # Matches tableName defined above
+          columns: [id]
+          onUpdate: cascade      # ON UPDATE CASCADE — propagate PK changes to this FK
+          # onDelete not specified — defaults to PostgreSQL NO ACTION (error on orphan delete)
+        constraints:
+          - type: required
+
+      - name: title
+        type: TEXT
+        constraints:
+          - type: required
+          - type: pattern
+            regex: "^[A-Za-z0-9 _\\-!?]{1,200}$"
+            message: "Title must be 1–200 characters; letters, numbers, spaces, and _-!? only"
+
+      - name: percent_approved
+        type: NUMERIC(8,2)
+        constraints:
+          - type: required
+
+      - name: column_order
+        type: INTEGER
+        default:
+          type: GENERATOR
+          value: "SEQUENCE(10,10)"

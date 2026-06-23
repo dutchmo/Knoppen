@@ -1,0 +1,335 @@
+# ============================================================
+# Upsert Validation Schema
+# ============================================================
+# Dialect:  postgresql
+# Schema:   code_sample
+#
+# Tables covered (in dependency order — data files must
+# respect this ordering for FOREIGN_CYCLE generators):
+#
+#   1. tag            (standalone lookup — no FKs)
+#   2. users          (standalone — no FKs)
+#   3. post           (FK → users)
+#   4. post_tag       (FK → post, tag  — compound PK + compound FK)
+#   5. audit_log      (FK → users, post)
+#   6. post_approval  (FK → post, users — compound unique)
+# ============================================================
+
+dialect: postgresql
+schema: code_sample
+
+validation:
+  defaultNullable: true
+  strictFields: true
+
+
+tables:
+
+  # ──────────────────────────────────────────────
+  # TABLE: tag
+  # Standalone lookup table.
+  # ON CONFLICT DO NOTHING — re-running seeds must be safe.
+  # ──────────────────────────────────────────────
+  - tableName: tag
+    description: "Content classification tags"
+    primaryKey: [id]
+
+    onConflict:
+      target: [id]
+      action: doNothing
+
+    columns:
+      - name: id
+        type: INTEGER
+        constraints:
+          - type: required
+
+      - name: name
+        type: VARCHAR(100)
+        constraints:
+          - type: required
+          - type: unique
+            conflictTarget: true
+          - type: pattern
+            regex: "^[A-Za-z0-9_\\-]{1,100}$"
+            message: "tag name must be alphanumeric, hyphens or underscores only"
+
+      - name: column_order
+        type: INTEGER
+        default:
+          type: GENERATOR
+          value: "SEQUENCE(10,10)"
+
+
+  # ──────────────────────────────────────────────
+  # TABLE: users
+  # ──────────────────────────────────────────────
+  - tableName: users
+    description: "Users in the system"
+    primaryKey: [id]
+
+    onConflict:
+      target: [id]
+      action: update
+      excludeFromUpdate:
+        - id
+        - createTs
+
+    columns:
+      - name: id
+        type: INTEGER
+        constraints:
+          - type: required
+
+      - name: source
+        type: VARCHAR(30)
+        default:
+          type: LITERAL
+          value: "Knoppen"
+        constraints:
+          - type: pattern
+            regex: "^[A-Za-z0-9_]+$"
+            message: "source must be alphanumeric with underscores only"
+
+      - name: type
+        type: VARCHAR(30)
+        constraints:
+          - type: enum
+            values: ["USER", "SUPERVISOR", "ADMIN"]
+            message: "type must be one of USER, SUPERVISOR, ADMIN"
+
+      - name: createTs
+        type: TIMESTAMP
+        default:
+          type: FUNCTION
+          value: CURRENT_TIMESTAMP
+
+      - name: approvedTs
+        type: TIMESTAMP
+        constraints:
+          - type: temporal
+            notFuture: true
+            notPast: "-P4Y"
+
+      - name: username
+        type: VARCHAR(255)
+        constraints:
+          - type: required
+          - type: unique
+            conflictTarget: true
+          - type: pattern
+            regex: "^[a-zA-Z0-9_]{3,50}$"
+            message: "username must be 3–50 alphanumeric characters or underscores"
+
+      - name: metadata
+        type: JSONB
+        default:
+          type: EXPRESSION
+          value: "'[]'::jsonb"
+
+
+  # ──────────────────────────────────────────────
+  # TABLE: post
+  # ──────────────────────────────────────────────
+  - tableName: post
+    description: "User-authored posts"
+    primaryKey: [id]
+
+    onConflict:
+      target: [id]
+      action: update
+      excludeFromUpdate:
+        - id
+        - user_id
+
+    columns:
+      - name: id
+        type: INTEGER
+        constraints:
+          - type: required
+
+      - name: user_id
+        type: INTEGER
+        foreignKey:
+          schema: code_sample
+          table: users
+          columns: [id]
+          onUpdate: cascade
+        constraints:
+          - type: required
+
+      - name: title
+        type: TEXT
+        constraints:
+          - type: required
+          - type: pattern
+            regex: "^[A-Za-z0-9 _\\-!?]{1,200}$"
+            message: "Title must be 1–200 characters; letters, numbers, spaces, and _-!? only"
+
+      - name: percent_approved
+        type: NUMERIC(8,2)
+        constraints:
+          - type: required
+
+      - name: column_order
+        type: INTEGER
+        default:
+          type: GENERATOR
+          value: "SEQUENCE(10,10)"
+
+
+  # ──────────────────────────────────────────────
+  # TABLE: post_tag
+  # Junction table — compound PK, compound FK.
+  # ON CONFLICT DO NOTHING — safe to re-run.
+  # ──────────────────────────────────────────────
+  - tableName: post_tag
+    description: "Many-to-many relationship between posts and tags"
+    primaryKey: [post_id, tag_id]
+
+    onConflict:
+      target: [post_id, tag_id]
+      action: doNothing
+
+    columns:
+      - name: post_id
+        type: INTEGER
+        foreignKey:
+          schema: code_sample
+          table: post
+          columns: [id]
+          onUpdate: cascade
+        constraints:
+          - type: required
+
+      - name: tag_id
+        type: INTEGER
+        foreignKey:
+          schema: code_sample
+          table: tag
+          columns: [id]
+          onUpdate: cascade
+        constraints:
+          - type: required
+
+      - name: column_order
+        type: INTEGER
+        default:
+          type: GENERATOR
+          value: "SEQUENCE(10,10)"
+
+
+  # ──────────────────────────────────────────────
+  # TABLE: audit_log
+  # Append-only event log.
+  # ON CONFLICT DO NOTHING — never overwrite a log entry.
+  # Exercises: TIMESTAMP_OFFSET generator, FOREIGN_CYCLE generator.
+  # ──────────────────────────────────────────────
+  - tableName: audit_log
+    description: "Immutable record of system events"
+    primaryKey: [id]
+
+    onConflict:
+      target: [id]
+      action: doNothing
+
+    columns:
+      - name: id
+        type: INTEGER
+        constraints:
+          - type: required
+
+      - name: user_id
+        type: INTEGER
+        foreignKey:
+          schema: code_sample
+          table: users
+          columns: [id]
+
+      - name: post_id
+        type: INTEGER
+        foreignKey:
+          schema: code_sample
+          table: post
+          columns: [id]
+
+      - name: event
+        type: VARCHAR(50)
+        constraints:
+          - type: required
+          - type: enum
+            values: ["USER_CREATED","POST_CREATED","POST_UPDATED","POST_APPROVED","POST_REJECTED"]
+            message: "event must be a known audit event type"
+
+      - name: event_ts
+        type: TIMESTAMP
+        default:
+          type: GENERATOR
+          value: "TIMESTAMP_OFFSET(HOURS,-6)"
+
+      - name: notes
+        type: TEXT
+
+
+  # ──────────────────────────────────────────────
+  # TABLE: post_approval
+  # One approval decision per (post, approver) pair.
+  # Exercises: compound unique ON CONFLICT target,
+  #            FOREIGN_CYCLE generator, SEQUENCE generator.
+  # ──────────────────────────────────────────────
+  - tableName: post_approval
+    description: "Approval decisions made by supervisors on posts"
+    primaryKey: [id]
+
+    onConflict:
+      target: [post_id, approver_id]   # compound unique — not the PK
+      action: update
+      excludeFromUpdate:
+        - id
+        - post_id
+        - approver_id
+        - decided_ts                    # preserve original decision timestamp
+
+    columns:
+      - name: id
+        type: INTEGER
+        constraints:
+          - type: required
+
+      - name: post_id
+        type: INTEGER
+        foreignKey:
+          schema: code_sample
+          table: post
+          columns: [id]
+        constraints:
+          - type: required
+
+      - name: approver_id
+        type: INTEGER
+        foreignKey:
+          schema: code_sample
+          table: users
+          columns: [id]
+        constraints:
+          - type: required
+
+      - name: decision
+        type: VARCHAR(20)
+        constraints:
+          - type: required
+          - type: enum
+            values: ["APPROVED","REJECTED","ABSTAINED"]
+            message: "decision must be APPROVED, REJECTED, or ABSTAINED"
+
+      - name: decided_ts
+        type: TIMESTAMP
+        default:
+          type: FUNCTION
+          value: CURRENT_TIMESTAMP
+
+      - name: column_order
+        type: INTEGER
+        default:
+          type: GENERATOR
+          value: "SEQUENCE(10,10)"

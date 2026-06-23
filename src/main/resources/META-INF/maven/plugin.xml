@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plugin>
+    <name>Bootstrap SQL Generator</name>
+    <description>Generates SQL from YAML configuration files</description>
+    <groupId>com.yourcompany</groupId>
+    <artifactId>bootstrap-sqlgen-maven-plugin</artifactId>
+    <version>1.0.0-SNAPSHOT</version>
+    <goalPrefix>bootstrap-sqlgen</goalPrefix>
+
+    <mojos>
+        <mojo>
+            <goal>validate</goal>
+            <description>Validate YAML configuration against JSON schema</description>
+            <requiresDirectInvocation>false</requiresDirectInvocation>
+            <requiresProject>true</requiresProject>
+            <phase>validate</phase>
+            <implementation>com.yourcompany.bootstrapsqlgen.mojos.ValidateMojo</implementation>
+        </mojo>
+
+        <mojo>
+            <goal>generate</goal>
+            <description>Generate SQL statements from YAML configuration</description>
+            <requiresDirectInvocation>false</requiresDirectInvocation>
+            <requiresProject>true</requiresProject>
+            <phase>generate-sources</phase>
+            <implementation>com.yourcompany.bootstrapsqlgen.mojos.GenerateMojo</implementation>
+        </mojo>
+
+        <mojo>
+            <goal>clean</goal>
+            <description>Clean generated SQL files</description>
+            <requiresDirectInvocation>false</requiresDirectInvocation>
+            <requiresProject>true</requiresProject>
+            <phase>clean</phase>
+            <implementation>com.yourcompany.bootstrapsqlgen.mojos.CleanMojo</implementation>
+        </mojo>
+
+        <mojo>
+            <goal>execute</goal>
+            <description>Execute generated SQL against database</description>
+            <requiresDirectInvocation>false</requiresDirectInvocation>
+            <requiresProject>true</requiresProject>
+            <phase>process-resources</phase>
+            <implementation>com.yourcompany.bootstrapsqlgen.mojos.ExecuteMojo</implementation>
+        </mojo>
+    </mojos>
+</plugin>
