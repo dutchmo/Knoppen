@@ -11,6 +11,7 @@ import kotlinx.serialization.Serializable
 data class DatabaseSchema(
     val dialect: String,                            // e.g. "postgresql"
     val schema: String,                             // e.g. "code_sample"
+    val rootDataPath: String? = null,               // optional base dir for data file resolution
     val validation: ValidationConfig,
     val tables: List<TableSchema>
 )
@@ -30,6 +31,7 @@ data class TableSchema(
     val schemaName: String = "",                    // populated by SchemaParser from DatabaseSchema.schema
     val tableName: String,                          // Matches YAML key "tableName"
     val description: String? = null,
+    val files: List<String> = emptyList(),          // data file paths relative to rootDataPath
     val primaryKey: List<String>,                   // List of column names forming the PK
     val onConflict: OnConflictConfig? = null,
     val columns: List<ColumnSchema>

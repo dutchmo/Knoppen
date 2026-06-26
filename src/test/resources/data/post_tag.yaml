@@ -1,0 +1,44 @@
+
+# ──────────────────────────────────────────────
+# post_tag
+# Exercises:
+#   - Compound PK (post_id, tag_id)
+#   - Compound FK → post AND → tag
+#   - ON CONFLICT DO NOTHING
+#   - SEQUENCE generator (column_order)
+#   - Duplicate compound PK row to prove DO NOTHING fires
+# ──────────────────────────────────────────────
+- post_id: 100
+  tag_id: 1
+  # column_order generated: 10
+
+- post_id: 100
+  tag_id: 2
+  # column_order generated: 20
+
+- post_id: 101
+  tag_id: 1
+  # column_order generated: 30
+
+- post_id: 102
+  tag_id: 3
+  # column_order generated: 40
+
+- post_id: 103
+  tag_id: 4
+  # column_order generated: 50
+
+- post_id: 104
+  tag_id: 1
+  # column_order generated: 60
+
+- post_id: 104
+  tag_id: 2
+  # column_order generated: 70
+
+# ── ON CONFLICT DO NOTHING exercise ───────────────────
+# (post_id: 100, tag_id: 1) already exists above.
+# This row must be silently skipped.
+- post_id: 100
+  tag_id: 1
+  # column_order generated: 80 (discarded — DO NOTHING)

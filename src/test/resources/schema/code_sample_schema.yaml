@@ -17,6 +17,7 @@
 
 dialect: postgresql
 schema: code_sample
+rootDataPath: ../data
 
 validation:
   defaultNullable: true
@@ -32,6 +33,8 @@ tables:
   # ──────────────────────────────────────────────
   - tableName: tag
     description: "Content classification tags"
+    files:
+      - tag.yaml
     primaryKey: [id]
 
     onConflict:
@@ -66,6 +69,9 @@ tables:
   # ──────────────────────────────────────────────
   - tableName: users
     description: "Users in the system"
+    files:
+      - users.yaml
+      - users2.yaml
     primaryKey: [id]
 
     onConflict:
@@ -133,6 +139,8 @@ tables:
   # ──────────────────────────────────────────────
   - tableName: post
     description: "User-authored posts"
+    files:
+      - post.yaml
     primaryKey: [id]
 
     onConflict:
@@ -185,6 +193,8 @@ tables:
   # ──────────────────────────────────────────────
   - tableName: post_tag
     description: "Many-to-many relationship between posts and tags"
+    files:
+      - post_tag.yaml
     primaryKey: [post_id, tag_id]
 
     onConflict:
@@ -227,6 +237,8 @@ tables:
   # ──────────────────────────────────────────────
   - tableName: audit_log
     description: "Immutable record of system events"
+    files:
+      - audit_log.yaml
     primaryKey: [id]
 
     onConflict:
@@ -279,6 +291,8 @@ tables:
   # ──────────────────────────────────────────────
   - tableName: post_approval
     description: "Approval decisions made by supervisors on posts"
+    files:
+      - post_approval.yaml
     primaryKey: [id]
 
     onConflict:

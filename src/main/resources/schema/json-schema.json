@@ -20,6 +20,11 @@
       "pattern": "^[A-Za-z0-9_]+$"
     },
 
+    "rootDataPath": {
+      "type": "string",
+      "description": "Base directory for resolving data file paths; relative to the schema file's directory"
+    },
+
     "validation": {
       "type": "object",
       "description": "Global validation configuration",
@@ -59,6 +64,12 @@
         },
         "description": {
           "type": "string"
+        },
+        "files": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "List of data file paths for this table, resolved relative to rootDataPath"
         },
         "primaryKey": {
           "type": "array",

@@ -1,16 +1,12 @@
 package org.austindroids.knoppen
 
-import org.austindroids.knoppen.datafile.DataFileLoader
+import org.austindroids.knoppen.datafile.DataFileLoaderFactory
 import org.austindroids.knoppen.datafile.DataFileValidator
 import org.austindroids.knoppen.datafile.DataValidationError
 import org.austindroids.knoppen.schema.DatabaseSchema
-import java.io.InputStream
 
 /**
  * Wraps the result of data file validation.
- *
- * [errors] contains both ERROR- and WARNING-severity items.
- * [hasErrors] is true only when at least one ERROR is present.
  */
 data class DataValidationResult(
     val errors: List<DataValidationError>
@@ -36,16 +32,23 @@ data class DataValidationResult(
 }
 
 /**
- * Stream-oriented facade over [DataFileValidator].
+ * Utility facade for validating a single data file against a schema table.
  *
- * Accepts a parsed [DatabaseSchema] and a raw data YAML stream, and returns
- * a [DataValidationResult] for use in tests and the CLI pipeline.
+ * @param schema    The parsed [DatabaseSchema]
+ * @param tableName The table whose schema the data rows are validated against
+ * @param content   Raw data file content
+ * @param extension File extension used to select the correct loader (default: "yaml")
  */
 object DataValidator {
-    fun validate(schema: DatabaseSchema, dataStream: InputStream): DataValidationResult {
-        val yamlContent = dataStream.bufferedReader().readText()
-        val loadResult  = DataFileLoader().load(yamlContent)
-        val errors      = DataFileValidator(schema, loadResult).validate()
+    fun validate(
+        schema:    DatabaseSchema,
+        tableName: String,
+        content:   String,
+        extension: String = "yaml"
+    ): DataValidationResult {
+        val loader     = DataFileLoaderFactory.forExtension(extension)
+        val loadResult = loader.load(content, tableName)
+        val errors     = DataFileValidator(schema, tableName, loadResult.rows, loadResult.lineIndex).validate()
         return DataValidationResult(errors)
     }
 }

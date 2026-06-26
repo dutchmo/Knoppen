@@ -1,15 +1,15 @@
-# Bootstrap SQL Generator Maven Plugin
+# Knoppen (SQL Generator Maven Plugin)
 
-A Maven plugin that reads YAML configuration files and generates SQL insert/update statements for database bootstrap data.
+A Maven plugin that reads YAML configuration files and generates SQL insert/update statements for database system data.
 
 
-This project is a Maven plugin written in Kotlin and build with Kotlin Gradle DSL (similar in concept to Swagger/OpenAPI) that reads a YAML configuration file, and either validates the file against
-a JSON schema, or generates SQL insert/update statements from the YAML file that create/maintain generic code data in a Postgres (or other) database. Will use snakeyaml and Ktorm, and log4j2 for logging.
+This project is a Maven plugin written in Kotlin and built with Kotlin Gradle DSL. Similar in concept to Swagger/OpenAPI generation of service artifact generation, but instead generates SQL. 
+
+reads a YAML configuration file, 
+Validates the file against a JSON schema
+generates SQL insert/update statements from YAML/CSV files
 
 Operations in the plugin are tied to appropriate Maven lifecycle events.
-
-The project is maintained in github, will have unit tests and will use github to do continuous integration and host a bugtracker.
-The plugin can be published to a nexus server.
 
 
 - Validation

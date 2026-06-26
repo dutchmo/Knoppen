@@ -1,7 +1,7 @@
 // import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 group = "org.austindroids"
-version = "1.0.0"
+version = "0.5.0"
 
 val jacksonver = "3.2.0"
 val testcontainerver = "2.0.5"
@@ -45,13 +45,17 @@ dependencies {
     implementation(platform("tools.jackson:jackson-bom:$jacksonver"))
     implementation("tools.jackson.core:jackson-databind")
     implementation("tools.jackson.core:jackson-core")
-    // jackson-annotations is managed by the BOM (still under com.fasterxml.jackson.core groupId)
+
     // Jackson Kotlin Module (for Kotlin interop)
     implementation("tools.jackson.module:jackson-module-kotlin")
     // Jackson YAML Module
     implementation("tools.jackson.dataformat:jackson-dataformat-yaml")
     // Jackson Java 8 Time module — use 2.x version (compatible with 3.x)
-    //implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.22.0")
+    //implementation("tools.jackson.datatype:jackson-datatype-jsr310")  // version from BOM
+
+
+    // CSV
+    implementation("com.jsoizo:kotlin-csv-jvm:2.0.0")
 
     // Database & ORM
     implementation("org.ktorm:ktorm-core:4.1.1")
@@ -60,7 +64,7 @@ dependencies {
 
     // Logging
     implementation("org.slf4j:slf4j-api:2.0.18")
-    implementation("ch.qos.logback:logback-classic:1.5.34")
+    // implementation("ch.qos.logback:logback-classic:1.5.34")
 
 
     // CLI
@@ -106,8 +110,30 @@ dependencies {
 kotlin {
     jvmToolchain(24) // use JDK 24 to compile
     compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_24) // but produce Java 17 bytecode
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) // but produce Java 17 bytecode
         freeCompilerArgs.addAll("-Xjsr305=strict")
+    }
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+tasks.processResources {
+    inputs.property("version", project.version.toString())
+    inputs.property("appName", rootProject.name)
+    filesMatching("version.properties") {
+        expand(mapOf(
+            "version" to project.version.toString(),
+            "appName" to rootProject.name
+        ))
+    }
+}
+
+tasks.jar {
+    manifest {
+        attributes("Implementation-Version" to project.version)
     }
 }
 
@@ -126,6 +152,8 @@ tasks.jacocoTestReport {
         html.required.set(true)
     }
 }
+
+kotest {customGradleTask = true}
 
 dokka {
     moduleName.set("Knoppen")
@@ -146,7 +174,7 @@ publishing {
             pom {
                 name.set("Knoppen Maven Plugin")
                 description.set("A Maven plugin that generates SQL from YAML configuration")
-                url.set("https://github.com/yourusername/Knoppen")
+                url.set("https://github.com/dutchmo/Knoppen")
                 licenses {
                     license {
                         name.set("Apache License 2.0")
@@ -157,7 +185,7 @@ publishing {
                     developer {
                         id.set("dutch")
                         name.set("Dutch Matous")
-                        email.set("Dutch@gmail.com")
+                        email.set("gregory.matous@gmail.com")
                     }
                 }
                 scm {
@@ -179,7 +207,7 @@ publishing {
         }
         maven {
             name = "Nexus"
-            url = uri("https://your-nexus-server/repository/maven-releases/")
+            url = uri("https://nexus-server/repository/maven-releases/")
             credentials {
                 username = System.getenv("NEXUS_USERNAME")
                 password = System.getenv("NEXUS_PASSWORD")

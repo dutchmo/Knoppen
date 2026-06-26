@@ -1,0 +1,60 @@
+
+
+# ──────────────────────────────────────────────
+# post_approval
+# Exercises:
+#   - ON CONFLICT on compound UNIQUE (post_id, approver_id) — NOT the PK
+#   - excludeFromUpdate: decided_ts preserved on conflict
+#   - FOREIGN_CYCLE: post_id cycles through post.id [100..104]
+#   - FOREIGN_CYCLE: approver_id cycles through users.id [1..5]
+#     (all users can be approvers here for coverage)
+#   - SEQUENCE generator (column_order)
+#   - Conflict row that updates decision but preserves decided_ts
+# ──────────────────────────────────────────────
+- id: 2000
+  post_id: 100
+  approver_id: 2
+  decision: "APPROVED"
+  decided_ts: "2025-02-01 10:00:00+00"
+  # column_order generated: 10
+
+- id: 2001
+  post_id: 101
+  approver_id: 2
+  decision: "REJECTED"
+  decided_ts: "2025-02-02 11:00:00+00"
+  # column_order generated: 20
+
+- id: 2002
+  post_id: 102
+  approver_id: 5
+  decision: "APPROVED"
+  decided_ts: "2025-02-03 09:30:00+00"
+  # column_order generated: 30
+
+- id: 2003
+  post_id: 103
+  approver_id: 5
+  decision: "ABSTAINED"
+  decided_ts: "2025-02-04 14:00:00+00"
+  # column_order generated: 40
+
+- id: 2004
+  post_id: 104
+  approver_id: 2
+  decision: "APPROVED"
+  decided_ts: "2025-02-05 16:00:00+00"
+  # column_order generated: 50
+
+# ── ON CONFLICT on compound unique exercise ────────────
+# (post_id: 101, approver_id: 2) matches row id: 2001.
+# Conflict target is (post_id, approver_id) — not id.
+# decision WILL be updated (REJECTED → APPROVED).
+# decided_ts WILL NOT change (excludeFromUpdate).
+# id WILL NOT change (excludeFromUpdate).
+- id: 9999                  # ignored — id is in excludeFromUpdate
+  post_id: 101
+  approver_id: 2
+  decision: "APPROVED"      # updated from REJECTED
+  decided_ts: "2099-01-01 00:00:00+00"  # ignored — decided_ts is in excludeFromUpdate
+  # column_order generated: 60 (will update — not excluded)

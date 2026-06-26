@@ -1,0 +1,43 @@
+
+# ──────────────────────────────────────────────
+# users
+# Exercises:
+#   - ON CONFLICT UPDATE with excludeFromUpdate
+#   - LITERAL default  (source)
+#   - FUNCTION default (createTs)
+#   - EXPRESSION default (metadata)
+#   - enum constraint (type)
+#   - temporal constraint (approvedTs) — one intentionally bad row flagged below
+#   - ON CONFLICT on username unique key
+# ──────────────────────────────────────────────
+- id: 1
+  username: "alice"
+  type: "ADMIN"
+  approvedTs: "2023-06-01 09:00:00+00"
+  # source   → LITERAL default  → 'Knoppen'
+  # createTs → FUNCTION default → CURRENT_TIMESTAMP
+  # metadata → EXPRESSION default → '[]'::jsonb
+
+- id: 2
+  username: "bob"
+  type: "SUPERVISOR"
+  approvedTs: "2022-11-15 14:30:00+00"
+
+
+# ── ON CONFLICT UPDATE exercise ───────────────────────
+# id: 2 already exists. Action is UPDATE.
+# createTs must NOT change (excludeFromUpdate).
+# type and approvedTs will be updated.
+- id: 2
+  username: "bob"
+  type: "ADMIN"              # was SUPERVISOR — should update
+  approvedTs: "2025-01-01 10:00:00+00"
+
+# ── Temporal constraint violation (notPast: -P4Y) ─────
+# approvedTs is more than 4 years in the past.
+# This row SHOULD fail validation.
+# Expected error: temporal constraint "notPast" violated on column approvedTs
+- id: 6
+  username: "frank"
+  type: "USER"
+  approvedTs: "2019-01-01 00:00:00+00"   # BAD: > 4 years ago — validation must reject this

@@ -1,0 +1,38 @@
+# ============================================================
+# Data file: tag
+# Standalone — no foreign key dependencies.
+# Exercises:
+#   - ON CONFLICT DO NOTHING
+#   - SEQUENCE generator (column_order)
+#   - Duplicate PK row (id: 3) to prove DO NOTHING fires
+#     and does not overwrite the name
+# ============================================================
+
+
+- id: 1
+  name: "technology"
+  # column_order generated: 10
+
+- id: 2
+  name: "science"
+  # column_order generated: 20
+
+- id: 3
+  name: "health"
+  # column_order generated: 30
+
+- id: 4
+  name: "politics"
+  # column_order generated: 40
+
+- id: 5
+  name: "sports"
+  # column_order generated: 50
+
+# ── ON CONFLICT DO NOTHING exercise ──────────────────
+# id: 3 already exists as "health".
+# With DO NOTHING this row is silently skipped —
+# the name must remain "health" in the database.
+- id: 3
+  name: "THIS_SHOULD_NOT_APPEAR"
+  # column_order generated: 60 (also discarded)

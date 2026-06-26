@@ -12,6 +12,19 @@ object ResourceConstants {
     // Application configs
     const val APP_PROPERTIES = "application.properties"
     const val LOG4J2_XML = "log4j2.xml"
+
+    private val buildProps: java.util.Properties by lazy {
+        java.util.Properties().also { props ->
+            try {
+                javaClass.classLoader
+                    .getResourceAsStream("version.properties")
+                    ?.use { props.load(it) }
+            } catch (_: Exception) {}
+        }
+    }
+
+    val APP_VERSION: String get() = buildProps.getProperty("version", "Unknown")
+    val APP_NAME:    String get() = buildProps.getProperty("appName",  "Knoppen")
 }
 
 

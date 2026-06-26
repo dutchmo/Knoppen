@@ -13,45 +13,47 @@ import org.austindroids.knoppen.datafile.DataValidationError
 import org.austindroids.knoppen.sqlgen.UpsertGenerator
 import org.austindroids.knoppen.sqlgen.dialect.PostgresDialect
 import org.austindroids.knoppen.validation.SchemaValidator
-import java.io.InputStream
+import java.nio.file.Path
 
 // ============================================================
 // UpsertHappyPathTest.kt
 //
 // Kotest FunSpec — happy path only.
-// Tests are intentionally coarse at this stage; failure cases
-// and per-row SQL assertions will be added in later passes.
 //
-// Resource layout assumed:
+// Resource layout (test classpath):
 //   src/test/resources/schema/code_sample_schema.yaml
-//   src/test/resources/schema/upsert-schema.json   ← JSON meta-schema
-//   src/test/resources/data/data_tag.yaml
-//   src/test/resources/data/data_relational.yaml
+//   src/test/resources/data/tag.yaml
+//   src/test/resources/data/users.yaml
+//   src/test/resources/data/users2.yaml
+//   src/test/resources/data/post.yaml
+//   src/test/resources/data/post_tag.yaml
+//   src/test/resources/data/audit_log.yaml
+//   src/test/resources/data/post_approval.yaml
+//
+// The schema declares rootDataPath: ../data and files: [...] for each table.
+// The pipeline resolves all paths relative to the schema file location.
 // ============================================================
 
 class UpsertHappyPathTest : FunSpec({
 
     // ── Helpers ───────────────────────────────────────────────────────────
-    fun resourceStream(path: String): InputStream =
+    fun resourceText(path: String): String =
         UpsertHappyPathTest::class.java.classLoader
             .getResourceAsStream(path)
+            ?.bufferedReader()?.readText()
             ?: error("Test resource not found: $path")
 
-    fun resourceText(path: String): String =
-        resourceStream(path).bufferedReader().readText()
+    // Filesystem path used for file resolution in generateAll().
+    // Gradle sets the working directory to the project root during tests.
+    val schemaPath: Path = Path.of("src/test/resources/schema/code_sample_schema.yaml")
 
-    // ── Shared fixtures ───────────────────────────────────────────────────
-    val schemaYaml     by lazy { resourceText("schema/code_sample_schema.yaml") }
-    //val metaSchemaJson by lazy { resourceText("schema/upsert-schema.json")}
-    val dataTagYaml    by lazy { resourceText("data/data_tag.yaml")             }
-    val dataRelYaml    by lazy { resourceText("data/data_relational.yaml")      }
+    // Schema YAML loaded via classpath for meta-validation and deserialization.
+    val schemaYaml by lazy { resourceText("schema/code_sample_schema.yaml") }
 
     // ── Step 1: Schema meta-validation ────────────────────────────────────
     test("schema yaml passes meta-schema validation") {
         val result = SchemaValidator.validate(schemaYaml)
-
         result.prettyPrint().let(::println)
-
         result.hasErrors shouldBe false
     }
 
@@ -73,42 +75,8 @@ class UpsertHappyPathTest : FunSpec({
         )
     }
 
-    // ── Step 3: Data file validation ──────────────────────────────────────
-    context("data file validation") {
-        val dbSchema by lazy { SchemaParser.parse(schemaYaml.byteInputStream()) }
-
-        test("data_tag.yaml validates without errors") {
-            val result = DataValidator.validate(
-                schema     = dbSchema,
-                dataStream = dataTagYaml.byteInputStream()
-            )
-
-            result.prettyPrint().let(::println)
-
-            result.errors
-                .filter { it.severity == DataValidationError.Severity.ERROR }
-                .shouldBeEmpty()
-        }
-
-        test("data_relational.yaml validates without errors (frank row is WARN not ERROR)") {
-            val result = DataValidator.validate(
-                schema     = dbSchema,
-                dataStream = dataRelYaml.byteInputStream()
-            )
-
-            result.prettyPrint().let(::println)
-
-            val errors   = result.errors.filter { it.severity == DataValidationError.Severity.ERROR }
-            val warnings = result.errors.filter { it.severity == DataValidationError.Severity.WARNING }
-
-            errors   .shouldBeEmpty()
-            warnings .shouldHaveSize(1)
-            warnings.first().column shouldBe "approvedTs"
-        }
-    }
-
-    // ── Step 4: SQL generation ────────────────────────────────────────────
-    context("sql generation - data_tag.yaml") {
+    // ── Steps 3 + 4: Pipeline (validation + SQL generation together) ──────
+    context("pipeline - all tables") {
         val dbSchema  by lazy { SchemaParser.parse(schemaYaml.byteInputStream()) }
         val dialect   by lazy { PostgresDialect() }
         val generator by lazy { UpsertGenerator(dbSchema, dialect) }
@@ -116,18 +84,38 @@ class UpsertHappyPathTest : FunSpec({
         lateinit var result: UpsertGenerator.GenerationResult
 
         beforeTest {
-            result = generator.generateStatements(dataTagYaml.byteInputStream())
+            result = generator.generateAll(schemaPath)
+            result.prettyPrint().let(::println)
         }
 
-        test("generation produces no errors") {
-            result.hasErrors shouldBe false
+        // ── Validation ────────────────────────────────────────────────────
+
+        test("generation produces no hard errors") {
+            result.errors
+                .filter { it.severity == DataValidationError.Severity.ERROR }
+                .shouldBeEmpty()
         }
 
-        test("correct number of statements produced for tag") {
-            result.sql
-                .filter { it.table == "tag" }
-                .shouldHaveSize(6)
+        test("frank row produces temporal warning not an error") {
+            val warnings = result.errors.filter { it.severity == DataValidationError.Severity.WARNING }
+            warnings shouldHaveSize 1
+            warnings.first().column shouldBe "approvedTs"
         }
+
+        // ── Statement counts ──────────────────────────────────────────────
+
+        test("correct statement counts per table") {
+            val byTable = result.sql.groupBy { it.table }
+
+            byTable["tag"]!!           shouldHaveSize 6
+            byTable["users"]!!         shouldHaveSize 7
+            byTable["post"]!!          shouldHaveSize 6
+            byTable["post_tag"]!!      shouldHaveSize 8
+            byTable["audit_log"]!!     shouldHaveSize 9
+            byTable["post_approval"]!! shouldHaveSize 6
+        }
+
+        // ── tag table ─────────────────────────────────────────────────────
 
         test("all tag statements are INSERT INTO code_sample.tag") {
             result.sql
@@ -146,7 +134,7 @@ class UpsertHappyPathTest : FunSpec({
                 }
         }
 
-        test("SEQUENCE generator produces ascending column_order values") {
+        test("SEQUENCE generator produces ascending column_order values for tag") {
             val orders = result.sql
                 .filter { it.table == "tag" }
                 .mapNotNull { stmt ->
@@ -158,38 +146,14 @@ class UpsertHappyPathTest : FunSpec({
                 delta shouldBe 10
             }
         }
-    }
 
-    context("sql generation - data_relational.yaml") {
-        val dbSchema  by lazy { SchemaParser.parse(schemaYaml.byteInputStream()) }
-        val dialect   by lazy { PostgresDialect() }
-        val generator by lazy { UpsertGenerator(dbSchema, dialect) }
-
-        lateinit var result: UpsertGenerator.GenerationResult
-
-        beforeTest {
-            result = generator.generateStatements(dataRelYaml.byteInputStream())
-        }
-
-        test("generation produces no errors") {
-            result.hasErrors shouldBe false
-        }
+        // ── Relational tables ─────────────────────────────────────────────
 
         test("statements are produced for all relational tables") {
             val tables = result.sql.map { it.table }.toSet()
             tables shouldContainAll listOf(
                 "users", "post", "post_tag", "audit_log", "post_approval"
             )
-        }
-
-        test("correct statement counts per table") {
-            val byTable = result.sql.groupBy { it.table }
-
-            byTable["users"]!!         shouldHaveSize 7
-            byTable["post"]!!          shouldHaveSize 6
-            byTable["post_tag"]!!      shouldHaveSize 8
-            byTable["audit_log"]!!     shouldHaveSize 9
-            byTable["post_approval"]!! shouldHaveSize 6
         }
 
         test("post statements reference correct FK column user_id") {
@@ -220,9 +184,12 @@ class UpsertHappyPathTest : FunSpec({
         }
 
         test("users conflict row updates type but preserves createTs") {
+            // users.yaml rows: alice(0), bob-SUPERVISOR(1), bob-ADMIN-conflict(2), frank(3)
+            // users2.yaml rows: carol(4), dave(5), eve(6)
+            // The ON CONFLICT update row (bob ADMIN) is at merged rowIndex 2.
             val conflictRow = result.sql
                 .filter { it.table == "users" }
-                .find { it.rowIndex == 5 }
+                .find { it.rowIndex == 2 }
 
             conflictRow shouldNotBe null
             conflictRow!!.sql shouldContain "ON CONFLICT"
@@ -231,6 +198,7 @@ class UpsertHappyPathTest : FunSpec({
         }
 
         test("post conflict row excludes user_id from update") {
+            // post.yaml rows: id100(0), id101(1), id102(2), id103(3), id104(4), id101-conflict(5)
             val conflictRow = result.sql
                 .filter { it.table == "post" }
                 .find { it.rowIndex == 5 }

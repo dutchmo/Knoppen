@@ -1,0 +1,30 @@
+
+
+
+
+# ──────────────────────────────────────────────
+# users
+# Exercises:
+#   - ON CONFLICT UPDATE with excludeFromUpdate
+#   - LITERAL default  (source)
+#   - FUNCTION default (createTs)
+#   - EXPRESSION default (metadata)
+#   - enum constraint (type)
+#   - temporal constraint (approvedTs) — one intentionally bad row flagged below
+#   - ON CONFLICT on username unique key
+# ──────────────────────────────────────────────
+- id: 3
+  username: "carol"
+  type: "USER"
+  approvedTs: "2024-01-10 08:00:00+00"
+
+- id: 4
+  username: "dave"
+  type: "USER"
+  # approvedTs omitted — nullable, no constraint triggered
+
+- id: 5
+  username: "eve"
+  type: "SUPERVISOR"
+  approvedTs: "2023-03-20 12:00:00+00"
+  source: "ManualEntry"      # overrides LITERAL default
