@@ -45,9 +45,16 @@ class UpsertGenerator(
     // Result types
     // ─────────────────────────────────────────────────────────────────────────
 
+    data class FileStats(
+        val filePath: String,
+        val tableName: String,
+        val rowCount: Int
+    )
+
     data class GenerationResult(
         val errors: List<DataValidationError>,
-        val sql: List<NamedStatement>
+        val sql: List<NamedStatement>,
+        val fileStats: List<FileStats> = emptyList()
     ) {
         data class NamedStatement(
             val table: String,
@@ -84,6 +91,15 @@ class UpsertGenerator(
             }
         }
 
+        fun toSqlString(): String = buildString {
+            appendLine(sqlHeader())
+            sql.forEach { stmt ->
+                appendLine()
+                appendLine("-- Table: ${stmt.table}, row[${stmt.rowIndex}]")
+                appendLine(stmt.sql)
+            }
+        }
+
         private fun sqlHeader(): String {
             val now       = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
             val user      = System.getProperty("user.name", "unknown")
@@ -114,16 +130,22 @@ class UpsertGenerator(
     /**
      * Runs the full pipeline driven by the schema's `files:` declarations.
      *
-     * @param schemaPath Path to the schema file; its parent directory is used as
-     *                   the base for resolving [DatabaseSchema.rootDataPath] and
-     *                   any relative file entries in each table's `files:` list.
+     * @param schemaPath          Path to the schema file; its parent directory is the base for
+     *                            resolving [DatabaseSchema.rootDataPath] and relative file entries.
+     * @param rootDataPathOverride When non-null, replaces the schema's `rootDataPath` entirely.
+     * @param generateSql         When false, skips SQL generation (validate-only mode).
      */
-    fun generateAll(schemaPath: Path): GenerationResult {
+    fun generateAll(
+        schemaPath: Path,
+        rootDataPathOverride: Path? = null,
+        generateSql: Boolean = true
+    ): GenerationResult {
         val schemaDir   = schemaPath.parent
-        val baseDataDir = if (dbSchema.rootDataPath != null)
-            schemaDir.resolve(dbSchema.rootDataPath).normalize()
-        else
-            schemaDir
+        val baseDataDir = when {
+            rootDataPathOverride != null -> rootDataPathOverride
+            dbSchema.rootDataPath != null -> schemaDir.resolve(dbSchema.rootDataPath).normalize()
+            else -> schemaDir
+        }
 
         // ── 1. Topological sort ────────────────────────────────────────────────
         val sortedTables: List<TableSchema> = try {
@@ -143,26 +165,28 @@ class UpsertGenerator(
 
         val allErrors    = mutableListOf<DataValidationError>()
         val allRows      = mutableMapOf<String, List<JsonNode>>()
+        val allFileStats = mutableListOf<FileStats>()
 
         // ── 2. Load, merge, and validate each table ────────────────────────────
         for (tableSchema in sortedTables) {
-            val (tableRows, tableErrors) = loadAndValidateTable(tableSchema, baseDataDir)
+            val (tableRows, tableErrors, fileStats) = loadAndValidateTable(tableSchema, baseDataDir)
             allErrors.addAll(tableErrors)
             allRows[tableSchema.tableName] = tableRows
+            allFileStats.addAll(fileStats)
         }
 
         // ── 3. Cross-table FK integrity ────────────────────────────────────────
         val fkErrors = ForeignKeyValidator(dbSchema, allRows).validate()
         allErrors.addAll(fkErrors)
 
-        // ── 4. Generate SQL (only when no hard errors) ─────────────────────────
-        val statements = if (allErrors.any { it.severity == DataValidationError.Severity.ERROR }) {
+        // ── 4. Generate SQL (only when no hard errors and generateSql=true) ────
+        val statements = if (!generateSql || allErrors.any { it.severity == DataValidationError.Severity.ERROR }) {
             emptyList()
         } else {
             buildAllStatements(sortedTables, allRows)
         }
 
-        return GenerationResult(allErrors, statements)
+        return GenerationResult(allErrors, statements, allFileStats)
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -172,14 +196,17 @@ class UpsertGenerator(
     /**
      * Loads all declared files for [tableSchema], merges their rows, detects
      * duplicate primary keys across files, and runs structural validation.
+     *
+     * Returns a triple of (merged rows, validation errors, per-file stats).
      */
     private fun loadAndValidateTable(
         tableSchema: TableSchema,
         baseDataDir: Path
-    ): Pair<List<JsonNode>, List<DataValidationError>> {
+    ): Triple<List<JsonNode>, List<DataValidationError>, List<FileStats>> {
 
         val errors    = mutableListOf<DataValidationError>()
         val tableRows = mutableListOf<JsonNode>()
+        val fileStats = mutableListOf<FileStats>()
         // Tracks PKs seen in previously-processed files — intra-file duplicates are
         // intentional (ON CONFLICT test rows) and must not trigger this check.
         val pkValuesFromPreviousFiles = mutableSetOf<String>()
@@ -229,10 +256,11 @@ class UpsertGenerator(
             }
             pkValuesFromPreviousFiles.addAll(thisFilePkKeys)
 
+            fileStats.add(FileStats(filePath, tableSchema.tableName, loadResult.rows.size))
             mergedLineIndex = DataFileLoader.LineIndex.merge(mergedLineIndex, loadResult.lineIndex, rowOffset)
         }
 
-        return Pair(tableRows, errors)
+        return Triple(tableRows, errors, fileStats)
     }
 
     /**

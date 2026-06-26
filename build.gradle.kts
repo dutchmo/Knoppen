@@ -13,6 +13,8 @@ plugins {
     alias(libs.plugins.kotest)
     `maven-publish`
     `java-library`
+    application
+    id("com.gradleup.shadow") version "9.4.2"
     id("org.jlleitschuh.gradle.ktlint") version "14.2.0"
     id("org.jetbrains.dokka") version "2.2.0"
     id("jacoco")
@@ -61,6 +63,9 @@ dependencies {
     implementation("org.ktorm:ktorm-core:4.1.1")
     implementation("org.ktorm:ktorm-support-postgresql:4.1.1")
     implementation("org.postgresql:postgresql:42.7.11")
+
+    // SQL formatting
+    implementation("com.github.vertical-blank:sql-formatter:2.0.5")
 
     // Logging
     implementation("org.slf4j:slf4j-api:2.0.18")
@@ -131,11 +136,33 @@ tasks.processResources {
     }
 }
 
+application {
+    mainClass.set("org.austindroids.MainKt")
+}
+
 tasks.jar {
     manifest {
-        attributes("Implementation-Version" to project.version)
+        attributes(
+            "Main-Class" to "org.austindroids.MainKt",
+            "Implementation-Version" to project.version
+        )
     }
 }
+
+tasks.shadowJar {
+    // The main class is auto-detected from your existing `application` block
+    archiveClassifier.set("")
+
+    // Merge service descriptor files instead of overwriting
+    mergeServiceFiles()
+
+    // Exclude signature files from dependency JARs (they break fat JARs)
+    exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA")
+
+    // Relocate if you ever have classpath conflicts:
+    // relocate("com.fasterxml.jackson", "shadow.com.fasterxml.jackson")
+}
+
 
 tasks.test {
     useJUnitPlatform()
@@ -169,7 +196,7 @@ tasks.register<Jar>("dokkaJar") {
 publishing {
     publications {
         create<MavenPublication>("mavenJava") {
-            from(components["java"])
+            artifact(tasks.shadowJar)
             artifact(tasks["dokkaJar"])
             pom {
                 name.set("Knoppen Maven Plugin")

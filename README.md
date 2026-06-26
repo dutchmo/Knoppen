@@ -1,44 +1,49 @@
 # Knoppen (SQL Generator Maven Plugin)
 
-A Maven plugin that reads YAML configuration files and generates SQL insert/update statements for database system data.
+A CLI/Maven plugin that reads YAML configuration files and generates SQL insert/update statements from datafiles.
 
+Similar in concept to Swagger/OpenAPI generation of service artifact generation, but generates SQL. 
 
-This project is a Maven plugin written in Kotlin and built with Kotlin Gradle DSL. Similar in concept to Swagger/OpenAPI generation of service artifact generation, but instead generates SQL. 
-
-reads a YAML configuration file, 
-Validates the file against a JSON schema
-generates SQL insert/update statements from YAML/CSV files
+1. reads a YAML configuration file, 
+2. Validates the file against a JSON schema
+3. Reads JSON/YAML/CSV datafiles
+4. generates SQL insert/update statements from data
 
 Operations in the plugin are tied to appropriate Maven lifecycle events.
 
-
-- Validation
-- Plugin
-- Sections
-- Comments
-- Natural and Surrogate keys
-- Foreign Keys
-- 
-- Defaults
-  Validate/Generate/Record Count
 - 
 ## Features
-
 
 - ✅ Integration with Maven lifecycle
 - ✅ Comprehensive unit tests
 - ✅ CI/CD with GitHub Actions
+- ✅ Supports JSON/YAML/CSV datafiles
+- ✅ Supports multiple datafiles per table
+- ✅ Upsert SQL generation
+- ✅ Datafile validation against schema
+- ✅ Validate/Generate/Record Count
 
-## Usage
 
+### Supported Database Features
+- Natural and Surrogate keys
+- Foreign Keys
+- Column Defaults
+- On conflict strategies
+- Column values derived from generators
+
+## CLI Usage
+
+### Validation
 ```bash
-db-seeder --schema schema.yaml \
-          --data data1.yaml,data2.yaml \
-          --output output.sql \
-          --dialect postgres \
-          --validate-only
+  knoppen validate schemas/blog.yaml
 ```
-### Basic Configuration
+
+### Generation
+```bash
+  knoppen generate schemas/blog.yaml --no-strict --root-data-path /tmp/data --output /tmp/blog_seed.sql
+```
+
+### Maven Configuration
 
 Add to your `pom.xml`:
 
@@ -47,7 +52,7 @@ Add to your `pom.xml`:
   <plugins>
     <plugin>
       <groupId>com.yourcompany</groupId>
-      <artifactId>bootstrap-sqlgen-maven-plugin</artifactId>
+      <artifactId>knoppen-maven-plugin</artifactId>
       <version>1.0.0</version>
       <configuration>
         <configFile>${project.basedir}/src/main/resources/bootstrap-config.yaml</configFile>
