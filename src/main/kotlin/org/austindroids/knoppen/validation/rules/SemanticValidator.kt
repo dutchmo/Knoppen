@@ -155,38 +155,38 @@ class SemanticValidator {
     ) {
         column.path("constraints").forEachIndexed { idx, constraint ->
             val constraintPath = "$colPath/constraints/$idx"
-            when (val type = constraint.path("type").asText()) {
+            when (val type = constraint.path("constraint").asText()) {
 
-                "pattern" -> validatePatternConstraint(context, constraint, constraintPath, colName)
-                "enum"    -> validateEnumConstraint(context, constraint, constraintPath, colName)
-                "temporal" -> validateTemporalConstraint(context, constraint, constraintPath, colName)
+                "PATTERN"  -> validatePatternConstraint(context, constraint, constraintPath, colName)
+                "ENUM"     -> validateEnumConstraint(context, constraint, constraintPath, colName)
+                "TEMPORAL" -> validateTemporalConstraint(context, constraint, constraintPath, colName)
 
-                "unique" -> {
+                "UNIQUE" -> {
                     val conflictTarget = constraint.path("conflictTarget").asBoolean(false)
                     if (conflictTarget) {
-                        // Verify the column actually has a "unique" constraint type — redundant
+                        // Verify the column actually has a "UNIQUE" constraint — redundant
                         // here since we ARE on a unique constraint, but guards copy-paste errors
                     }
                 }
 
-                "required" -> { /* no extra fields to validate */ }
+                "REQUIRED" -> { /* no extra fields to validate */ }
 
                 else -> context.error(
-                    "$constraintPath/type",
-                    "Column '$colName': unknown constraint type '$type'"
+                    "$constraintPath/constraint",
+                    "Column '$colName': unknown constraint '$type'"
                 )
             }
         }
 
         // Cross-constraint: conflictTarget on non-unique constraint
         column.path("constraints").forEachIndexed { idx, constraint ->
-            val isUnique = constraint.path("type").asText() == "unique"
+            val isUnique = constraint.path("constraint").asText() == "UNIQUE"
             val hasConflictTarget = constraint.path("conflictTarget").asBoolean(false)
             if (hasConflictTarget && !isUnique) {
                 context.error(
                     "$colPath/constraints/$idx/conflictTarget",
-                    "Column '$colName': conflictTarget: true is only valid on a 'unique' constraint," +
-                            " found on '${constraint.path("type").asText()}'"
+                    "Column '$colName': conflictTarget: true is only valid on a 'UNIQUE' constraint," +
+                            " found on '${constraint.path("constraint").asText()}'"
                 )
             }
         }
@@ -269,7 +269,7 @@ class SemanticValidator {
         val default = column.path("default")
         if (default.isMissingNode) return
 
-        val type = default.path("type").asText(null) ?: return  // structural catches missing
+        val type = default.path("kind").asText(null) ?: return  // structural catches missing
         val value = default.path("value").asText(null)
 
         if (value.isNullOrBlank()) {

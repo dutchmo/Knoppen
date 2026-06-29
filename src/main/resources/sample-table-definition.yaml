@@ -39,38 +39,38 @@ tables:
 
     columns:
       - name: id
-        type: INTEGER
+        datatype: INTEGER
         constraints:
-          - type: required
+          - constraint: REQUIRED
 
       - name: source
-        type: VARCHAR(30)
+        datatype: VARCHAR(30)
         default:
-          type: LITERAL          # A plain string literal value
+          kind: LITERAL          # A plain string literal value
           value: "Knoppen"
         constraints:
-          - type: pattern
+          - constraint: PATTERN
             regex: "^[A-Za-z0-9_]+$"
             message: "source must be alphanumeric with underscores only"
 
       - name: type
-        type: VARCHAR(30)
+        datatype: VARCHAR(30)
         constraints:
-          - type: enum
+          - constraint: ENUM
             values: ["USER", "SUPERVISOR", "ADMIN"]
             message: "type must be one of USER, SUPERVISOR, ADMIN"
 
       - name: createTs
-        type: TIMESTAMP
+        datatype: TIMESTAMP
         default:
-          type: FUNCTION         # SQL function — rendered unquoted (e.g. DEFAULT CURRENT_TIMESTAMP)
+          kind: FUNCTION         # SQL function — rendered unquoted (e.g. DEFAULT CURRENT_TIMESTAMP)
           value: CURRENT_TIMESTAMP
           # args: []             # Optional: use args if the function requires parameters
 
       - name: approvedTs
-        type: TIMESTAMP
+        datatype: TIMESTAMP
         constraints:
-          - type: temporal
+          - constraint: TEMPORAL
             notFuture: true
             # ISO 8601 duration — relative to validation runtime.
             # "P4Y" means "no more than 4 years in the past".
@@ -78,19 +78,19 @@ tables:
             notPast: "-P4Y"
 
       - name: username
-        type: VARCHAR(255)
+        datatype: VARCHAR(255)
         constraints:
-          - type: required
-          - type: unique
+          - constraint: REQUIRED
+          - constraint: UNIQUE
             conflictTarget: true   # This unique constraint drives ON CONFLICT target for username-based upserts
-          - type: pattern
+          - constraint: PATTERN
             regex: "^[a-zA-Z0-9_]{3,50}$"
             message: "username must be 3–50 alphanumeric characters or underscores"
 
       - name: metadata
-        type: JSONB
+        datatype: JSONB
         default:
-          type: EXPRESSION       # Arbitrary SQL expression — rendered unquoted and as-is
+          kind: EXPRESSION       # Arbitrary SQL expression — rendered unquoted and as-is
           value: "'[]'::jsonb"   # Empty JSON array cast to JSONB
 
 
@@ -109,12 +109,12 @@ tables:
 
     columns:
       - name: id
-        type: INTEGER            # Standardized to INTEGER (alias of INT in PostgreSQL)
+        datatype: INTEGER        # Standardized to INTEGER (alias of INT in PostgreSQL)
         constraints:
-          - type: required
+          - constraint: REQUIRED
 
       - name: user_id
-        type: INTEGER
+        datatype: INTEGER
         foreignKey:
           schema: code_sample    # Explicit schema qualification; inherits from top-level "schema" if omitted
           table: users           # Matches tableName defined above
@@ -122,23 +122,23 @@ tables:
           onUpdate: cascade      # ON UPDATE CASCADE — propagate PK changes to this FK
           # onDelete not specified — defaults to PostgreSQL NO ACTION (error on orphan delete)
         constraints:
-          - type: required
+          - constraint: REQUIRED
 
       - name: title
-        type: TEXT
+        datatype: TEXT
         constraints:
-          - type: required
-          - type: pattern
+          - constraint: REQUIRED
+          - constraint: PATTERN
             regex: "^[A-Za-z0-9 _\\-!?]{1,200}$"
             message: "Title must be 1–200 characters; letters, numbers, spaces, and _-!? only"
 
       - name: percent_approved
-        type: NUMERIC(8,2)
+        datatype: NUMERIC(8,2)
         constraints:
-          - type: required
+          - constraint: REQUIRED
 
       - name: column_order
-        type: INTEGER
+        datatype: INTEGER
         default:
-          type: GENERATOR
+          kind: GENERATOR
           value: "SEQUENCE(10,10)"

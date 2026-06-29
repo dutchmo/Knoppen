@@ -43,24 +43,24 @@ tables:
 
     columns:
       - name: id
-        type: INTEGER
+        datatype: INTEGER
         constraints:
-          - type: required
+          - constraint: REQUIRED
 
       - name: name
-        type: VARCHAR(100)
+        datatype: VARCHAR(100)
         constraints:
-          - type: required
-          - type: unique
+          - constraint: REQUIRED
+          - constraint: UNIQUE
             conflictTarget: true
-          - type: pattern
+          - constraint: PATTERN
             regex: "^[A-Za-z0-9_\\-]{1,100}$"
             message: "tag name must be alphanumeric, hyphens or underscores only"
 
       - name: column_order
-        type: INTEGER
+        datatype: INTEGER
         default:
-          type: GENERATOR
+          kind: GENERATOR
           value: "SEQUENCE(10,10)"
 
 
@@ -83,54 +83,54 @@ tables:
 
     columns:
       - name: id
-        type: INTEGER
+        datatype: INTEGER
         constraints:
-          - type: required
+          - constraint: REQUIRED
 
       - name: source
-        type: VARCHAR(30)
+        datatype: VARCHAR(30)
         default:
-          type: LITERAL
+          kind: LITERAL
           value: "Knoppen"
         constraints:
-          - type: pattern
+          - constraint: PATTERN
             regex: "^[A-Za-z0-9_]+$"
             message: "source must be alphanumeric with underscores only"
 
       - name: type
-        type: VARCHAR(30)
+        datatype: VARCHAR(30)
         constraints:
-          - type: enum
+          - constraint: ENUM
             values: ["USER", "SUPERVISOR", "ADMIN"]
             message: "type must be one of USER, SUPERVISOR, ADMIN"
 
       - name: createTs
-        type: TIMESTAMP
+        datatype: TIMESTAMP
         default:
-          type: FUNCTION
+          kind: FUNCTION
           value: CURRENT_TIMESTAMP
 
       - name: approvedTs
-        type: TIMESTAMP
+        datatype: TIMESTAMP
         constraints:
-          - type: temporal
+          - constraint: TEMPORAL
             notFuture: true
             notPast: "-P4Y"
 
       - name: username
-        type: VARCHAR(255)
+        datatype: VARCHAR(255)
         constraints:
-          - type: required
-          - type: unique
+          - constraint: REQUIRED
+          - constraint: UNIQUE
             conflictTarget: true
-          - type: pattern
+          - constraint: PATTERN
             regex: "^[a-zA-Z0-9_]{3,50}$"
             message: "username must be 3–50 alphanumeric characters or underscores"
 
       - name: metadata
-        type: JSONB
+        datatype: JSONB
         default:
-          type: EXPRESSION
+          kind: EXPRESSION
           value: "'[]'::jsonb"
 
 
@@ -152,37 +152,37 @@ tables:
 
     columns:
       - name: id
-        type: INTEGER
+        datatype: INTEGER
         constraints:
-          - type: required
+          - constraint: REQUIRED
 
       - name: user_id
-        type: INTEGER
+        datatype: INTEGER
         foreignKey:
           schema: code_sample
           table: users
           columns: [id]
           onUpdate: cascade
         constraints:
-          - type: required
+          - constraint: REQUIRED
 
       - name: title
-        type: TEXT
+        datatype: TEXT
         constraints:
-          - type: required
-          - type: pattern
+          - constraint: REQUIRED
+          - constraint: PATTERN
             regex: "^[A-Za-z0-9 _\\-!?]{1,200}$"
             message: "Title must be 1–200 characters; letters, numbers, spaces, and _-!? only"
 
       - name: percent_approved
-        type: NUMERIC(8,2)
+        datatype: NUMERIC(8,2)
         constraints:
-          - type: required
+          - constraint: REQUIRED
 
       - name: column_order
-        type: INTEGER
+        datatype: INTEGER
         default:
-          type: GENERATOR
+          kind: GENERATOR
           value: "SEQUENCE(10,10)"
 
 
@@ -203,29 +203,29 @@ tables:
 
     columns:
       - name: post_id
-        type: INTEGER
+        datatype: INTEGER
         foreignKey:
           schema: code_sample
           table: post
           columns: [id]
           onUpdate: cascade
         constraints:
-          - type: required
+          - constraint: REQUIRED
 
       - name: tag_id
-        type: INTEGER
+        datatype: INTEGER
         foreignKey:
           schema: code_sample
           table: tag
           columns: [id]
           onUpdate: cascade
         constraints:
-          - type: required
+          - constraint: REQUIRED
 
       - name: column_order
-        type: INTEGER
+        datatype: INTEGER
         default:
-          type: GENERATOR
+          kind: GENERATOR
           value: "SEQUENCE(10,10)"
 
 
@@ -247,40 +247,40 @@ tables:
 
     columns:
       - name: id
-        type: INTEGER
+        datatype: INTEGER
         constraints:
-          - type: required
+          - constraint: REQUIRED
 
       - name: user_id
-        type: INTEGER
+        datatype: INTEGER
         foreignKey:
           schema: code_sample
           table: users
           columns: [id]
 
       - name: post_id
-        type: INTEGER
+        datatype: INTEGER
         foreignKey:
           schema: code_sample
           table: post
           columns: [id]
 
       - name: event
-        type: VARCHAR(50)
+        datatype: VARCHAR(50)
         constraints:
-          - type: required
-          - type: enum
+          - constraint: REQUIRED
+          - constraint: ENUM
             values: ["USER_CREATED","POST_CREATED","POST_UPDATED","POST_APPROVED","POST_REJECTED"]
             message: "event must be a known audit event type"
 
       - name: event_ts
-        type: TIMESTAMP
+        datatype: TIMESTAMP
         default:
-          type: GENERATOR
+          kind: GENERATOR
           value: "TIMESTAMP_OFFSET(HOURS,-6)"
 
       - name: notes
-        type: TEXT
+        datatype: TEXT
 
 
   # ──────────────────────────────────────────────
@@ -306,44 +306,44 @@ tables:
 
     columns:
       - name: id
-        type: INTEGER
+        datatype: INTEGER
         constraints:
-          - type: required
+          - constraint: REQUIRED
 
       - name: post_id
-        type: INTEGER
+        datatype: INTEGER
         foreignKey:
           schema: code_sample
           table: post
           columns: [id]
         constraints:
-          - type: required
+          - constraint: REQUIRED
 
       - name: approver_id
-        type: INTEGER
+        datatype: INTEGER
         foreignKey:
           schema: code_sample
           table: users
           columns: [id]
         constraints:
-          - type: required
+          - constraint: REQUIRED
 
       - name: decision
-        type: VARCHAR(20)
+        datatype: VARCHAR(20)
         constraints:
-          - type: required
-          - type: enum
+          - constraint: REQUIRED
+          - constraint: ENUM
             values: ["APPROVED","REJECTED","ABSTAINED"]
             message: "decision must be APPROVED, REJECTED, or ABSTAINED"
 
       - name: decided_ts
-        type: TIMESTAMP
+        datatype: TIMESTAMP
         default:
-          type: FUNCTION
+          kind: FUNCTION
           value: CURRENT_TIMESTAMP
 
       - name: column_order
-        type: INTEGER
+        datatype: INTEGER
         default:
-          type: GENERATOR
+          kind: GENERATOR
           value: "SEQUENCE(10,10)"

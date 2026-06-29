@@ -3,7 +3,7 @@ package org.austindroids.knoppen.validation
 /**
  * Represents a single validation failure.
  *
- * @param path      Dot-separated path to the failing field  e.g. "tables[0].columns[2].type"
+ * @param path      Dot-separated path to the failing field  e.g. "tables[0].columns[2].datatype"
  * @param message   Human-readable description of the failure
  * @param line      Best-effort line number from the YAML source (null if not traceable)
  * @param severity  ERROR will abort upsert generation; WARNING is advisory only

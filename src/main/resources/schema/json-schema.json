@@ -115,14 +115,14 @@
 
     "ColumnSchema": {
       "type": "object",
-      "required": ["name", "type"],
+      "required": ["name", "datatype"],
       "additionalProperties": false,
       "properties": {
         "name": {
           "type": "string",
           "pattern": "^[A-Za-z0-9_]+$"
         },
-        "type": {
+        "datatype": {
           "type": "string",
           "description": "SQL type string e.g. VARCHAR(30), INTEGER, NUMERIC(8,2)",
           "pattern": "^[A-Z]+(?:\\([0-9]+(,[0-9]+)?\\))?$"
@@ -143,10 +143,10 @@
 
     "DefaultValue": {
       "type": "object",
-      "required": ["type", "value"],
+      "required": ["kind", "value"],
       "additionalProperties": false,
       "properties": {
-        "type": {
+        "kind": {
           "type": "string",
           "enum": ["LITERAL", "FUNCTION", "EXPRESSION", "GENERATOR"],
           "description": "LITERAL = quoted value, FUNCTION = unquoted SQL function, EXPRESSION = raw SQL, GENERATOR = built-in generator"
@@ -200,11 +200,11 @@
 
     "ColumnConstraint": {
       "type": "object",
-      "required": ["type"],
+      "required": ["constraint"],
       "properties": {
-        "type": {
+        "constraint": {
           "type": "string",
-          "enum": ["required", "unique", "enum", "pattern", "temporal"]
+          "enum": ["REQUIRED", "UNIQUE", "ENUM", "PATTERN", "TEMPORAL"]
         },
         "message": {
           "type": "string",
@@ -213,7 +213,7 @@
       },
       "allOf": [
         {
-          "if":   { "properties": { "type": { "const": "unique" } } },
+          "if":   { "properties": { "constraint": { "const": "UNIQUE" } } },
           "then": {
             "properties": {
               "conflictTarget": {
@@ -225,7 +225,7 @@
           }
         },
         {
-          "if":   { "properties": { "type": { "const": "enum" } } },
+          "if":   { "properties": { "constraint": { "const": "ENUM" } } },
           "then": {
             "required": ["values"],
             "properties": {
@@ -239,7 +239,7 @@
           }
         },
         {
-          "if":   { "properties": { "type": { "const": "pattern" } } },
+          "if":   { "properties": { "constraint": { "const": "PATTERN" } } },
           "then": {
             "required": ["regex"],
             "properties": {
@@ -251,7 +251,7 @@
           }
         },
         {
-          "if":   { "properties": { "type": { "const": "temporal" } } },
+          "if":   { "properties": { "constraint": { "const": "TEMPORAL" } } },
           "then": {
             "properties": {
               "notFuture": {

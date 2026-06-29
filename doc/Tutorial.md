@@ -77,34 +77,50 @@ Run from the fat JAR (after building):
 ## 3. Pipeline Flowchart
 
 ```mermaid  
+
+%%{init: {
+  'flowchart': {
+    'padding': 8,
+    'nodeSpacing': 15,
+    'rankSpacing': 25,
+    'wrappingWidth': 180,
+    'subGraphTitleMargin': { 'top': 10, 'bottom': 18 }
+  },
+  'themeVariables': { 'fontSize': '12px' }
+}}%%
 flowchart TD
-    A([Schema YAML file]) --> B["Schema Meta-Validation<br>JSON Schema check"]
-    B --> |errors: stop| Z1([Exit: schema invalid])
-    B --> C["Schema Deserialization<br>SchemaParser.parse"]
-    C --> |exception: stop| Z2([Exit: parse error])
-    C --> D["Topological Sort<br>FK dependency graph"]
-    D --> |cycle detected: stop| Z3([Exit: cyclic dependency])
-    D --> E{"For each table<br>in dependency order"}
-    E --> F["Resolve data file paths<br>rootDataPath + files"]
-    F --> G["Load Data File<br>YAML / JSON / CSV loader"]
-    G --> H["Structural Validation<br>per file: types, required,<br>constraints, unknown fields"]
-    H --> |collect errors| I["Merge rows into<br>table row set"]
-    I --> |cross-file PK duplicate check| E
-    E --> |all tables loaded| J["FK Integrity Validation<br>cross-table reference check"]
-    J --> |collect errors| K{"Any hard errors?"}
-    K --> |yes| L(["Exit: validation failed<br>print summary table"])
-    K --> |no, validate mode| M(["Exit: validation passed<br>print summary table"])
-    K --> |no, generate mode| N["SQL Generation<br>PostgresDialect.generateUpsert<br>per row in topological order"]
-    N --> O["Prepend SQL comment header<br>version · user · timestamp · counts"]
-    O --> P(["Write .sql file<br>print summary table"])
-    style Z1 fill:#f88,stroke:#c00
-    style Z2 fill:#f88,stroke:#c00
-    style Z3 fill:#f88,stroke:#c00
-    style L fill:#f88,stroke:#c00
-    style M fill:#8f8,stroke:#090
-    style P fill:#8f8,stroke:#090
+   A([Schema YAML file])
+   A --> B["Schema Meta-Validation<br>JSON Schema check"]
+   B -- errors: stop --> Z1([Exit: schema invalid])
+   B --> C["Schema Deserialization<br>SchemaParser.parse"]
+   C -- exception: stop --> Z2([Exit: parse error])
+   C --> D["Topological Sort<br>FK dependency graph"]
+   D -- cycle: stop --> Z3([Exit: cyclic dependency])
 
+   D --> LOOP
+   subgraph LOOP["<span style='font-size:12px; font-weight: bold'>For each table (dependency order)"]
+      direction TB
+      F["Resolve data file paths"] --> G["Load Data File<br>YAML / JSON / CSV"]
+      G --> H["Structural Validation<br>types, required, constraints"]
+      H --> I["Merge rows into table row set"]
+   end
 
+   I -- more tables --> F
+   I -- all tables loaded --> J["FK Integrity Validation<br>cross-table reference check"]
+
+   J --> K{"Any hard errors?"}
+   K -- yes --> L([Exit: validation failed])
+   K -- no, validate --> M([Exit: validation passed])
+   K -- no, generate --> N["SQL Generation<br>per row, topological order"]
+   N --> O["Prepend SQL comment header"]
+   O --> P([Write .sql file])
+
+   style Z1 fill:#f88,stroke:#c00
+   style Z2 fill:#f88,stroke:#c00
+   style Z3 fill:#f88,stroke:#c00
+   style L fill:#f88,stroke:#c00
+   style M fill:#8f8,stroke:#090
+   style P fill:#8f8,stroke:#090
     
 ```  
   
@@ -119,7 +135,9 @@ dialect: postgresql
 schema: my_schema  
 rootDataPath: ../data       # optional  
 validation:  
-  defaultNullable: true  strictFields: falsetables:  
+  defaultNullable: true  
+  strictFields: false
+  tables:  
   - tableName: ...    ...  
 ```  
 
@@ -178,20 +196,29 @@ tables:
 
 ```yaml  
 columns:  
-  - name: user_id    type: INTEGER    foreignKey:      table: users      columns: [id]    default:      type: LITERAL      value: "0"    constraints:      - type: required  
+  - name: user_id    
+    datatype: INTEGER    
+    foreignKey:      
+      table: users      
+      columns: [id]    
+    default:      
+      kind: LITERAL      
+      value: "0"    
+    constraints:      
+    - constraint: REQUIRED  
 ```  
 
-| Field | Type | Required | Description |  
-|-------|------|----------|-------------|  
-| `name` | string | Yes | Column name. Must match `^[A-Za-z0-9_]+$`. |  
-| `type` | string | Yes | SQL type string (see §4.5). |  
-| `default` | object | No | Default value applied when the data file omits the column (see §4.6). |  
-| `foreignKey` | object | No | FK reference to a parent table (see §4.8). |  
+| Field         | Type | Required | Description |  
+|---------------|------|----------|-------------|  
+| `name`        | string | Yes | Column name. Must match `^[A-Za-z0-9_]+$`. |  
+| `datatype`    | string | Yes | SQL type string (see §4.5). |  
+| `default`     | object | No | Default value applied when the data file omits the column (see §4.6). |  
+| `foreignKey`  | object | No | FK reference to a parent table (see §4.8). |  
 | `constraints` | array | No | Validation constraints applied to the column's data values (see §4.7). |  
 
-### 4.5 Column Types
+### 4.5 Column Datatypes
 
-The `type` field is a raw SQL type string. It must be **uppercase** with optional numeric parameters:
+The `datatype` field is a raw SQL type string. It must be **uppercase** with optional numeric parameters:
 
 | Example | Notes |  
 |---------|-------|  
@@ -207,8 +234,8 @@ The `type` field is a raw SQL type string. It must be **uppercase** with optiona
 | `JSONB` | PostgreSQL JSON binary — values are cast with `::jsonb` in output |  
 | `JSON` | PostgreSQL JSON text |  
 
-> **Type pattern**: `^[A-Z]+(?:\([0-9]+(,[0-9]+)?\))?$`  > Example valid: `VARCHAR(30)`, `NUMERIC(8,2)`, `INTEGER`.    
-> The base type (before `(`) is used for validation; unknown base types are allowed without error.
+> **DataType pattern**: `^[A-Z]+(?:\([0-9]+(,[0-9]+)?\))?$`  > Example valid: `VARCHAR(30)`, `NUMERIC(8,2)`, `INTEGER`.    
+> The base datatype (before `(`) is used for validation; unknown base datatypes are allowed without error.
 
 ### 4.6 Default Values
 
@@ -216,38 +243,44 @@ A `default` block describes how to fill a column when the data file row does not
 
 ```yaml  
 default:  
-  type: LITERAL | FUNCTION | EXPRESSION | GENERATOR  value: "..."  args: []        # only used by FUNCTION type  
+  kind: LITERAL | FUNCTION | EXPRESSION | GENERATOR  
+  value: "..."  
+  args: []        # only used by FUNCTION kind  
 ```  
 
-| `type` | Rendered in SQL | Example `value` | Output |  
-|--------|----------------|----------------|--------|  
-| `LITERAL` | Quoted string literal | `"Knoppen"` | `'Knoppen'` |  
-| `FUNCTION` | Unquoted SQL function call | `CURRENT_TIMESTAMP` | `CURRENT_TIMESTAMP` |  
+| `kind`       | Rendered in SQL | Example `value` | Output |  
+|--------------|----------------|----------------|--------|  
+| `LITERAL`    | Quoted string literal | `"Knoppen"` | `'Knoppen'` |  
+| `FUNCTION`   | Unquoted SQL function call | `CURRENT_TIMESTAMP` | `CURRENT_TIMESTAMP` |  
 | `EXPRESSION` | Raw SQL expression, rendered as-is | `'[]'::jsonb` | `'[]'::jsonb` |  
-| `GENERATOR` | Evaluated in Kotlin per row before SQL is built | `SEQUENCE(10,10)` | e.g. `10`, `20`, `30` |  
+| `GENERATOR`  | Evaluated in Kotlin per row before SQL is built | `SEQUENCE(10,10)` | e.g. `10`, `20`, `30` |  
 
 **LITERAL** is useful for fixed string or numeric defaults:
 ```yaml  
 default:  
-  type: LITERAL  value: "active"    # → 'active' in SQL  
+  kind: LITERAL  
+  value: "active"    # → 'active' in SQL  
 ```  
 
 **FUNCTION** is for SQL functions you want the database to evaluate at insert time:
 ```yaml  
 default:  
-  type: FUNCTION  value: CURRENT_TIMESTAMP    # → CURRENT_TIMESTAMP in SQL (no quotes)  
+  kind: FUNCTION  
+  value: CURRENT_TIMESTAMP    # → CURRENT_TIMESTAMP in SQL (no quotes)  
 ```  
 
 **EXPRESSION** is for complex SQL that is neither a simple string nor a bare function:
 ```yaml  
 default:  
-  type: EXPRESSION  value: "'[]'::jsonb"    # → '[]'::jsonb in SQL  
+  kind: EXPRESSION  
+  value: "'[]'::jsonb"    # → '[]'::jsonb in SQL  
 ```  
 
-**GENERATOR** (see §5 for the full reference) is evaluated by Knoppen for each row before writing SQL. The generated value is inserted as a quoted or unquoted literal depending on its type:
+**GENERATOR** (see §5 for the full reference) is evaluated by Knoppen for each row before writing SQL. The generated value is inserted as a quoted or unquoted literal depending on its datatype:
 ```yaml  
 default:  
-  type: GENERATOR  value: "SEQUENCE(1, 1)"    # row 0 → 1, row 1 → 2, ...  
+  kind: GENERATOR  
+  value: "SEQUENCE(1, 1)"    # row 0 → 1, row 1 → 2, ...  
 ```  
 
 > **Data file override**: If a data file row includes a value for a column that has a `GENERATOR` default, the data file value takes precedence. The generator is only invoked when the column is absent from the row.
@@ -256,59 +289,68 @@ default:
 
 Constraints validate each row's column values. Failures produce either an `ERROR` (blocks SQL generation) or a `WARNING` (advisory).
 
-#### `required`
+#### `REQUIRED`
 
 The field must be present and non-null.
 
 ```yaml  
 constraints:  
-  - type: required    message: "user_id is required"    # optional custom message  
+  - constraint: REQUIRED    
+    message: "user_id is required"    # optional custom message  
 ```  
 
-#### `unique`
+#### `UNIQUE`
 
 All values for this column within the loaded data file must be distinct.
 
 ```yaml  
 constraints:  
-  - type: unique    conflictTarget: false    # set to true if this column is the ON CONFLICT target    message: "email must be unique"  
+  - constraint: UNIQUE    
+    conflictTarget: false    # set to true if this column is the ON CONFLICT target    
+    message: "email must be unique"  
 ```  
 
 Setting `conflictTarget: true` means this unique constraint is the one driving the `ON CONFLICT (column)` clause. Duplicate values in the data file for a column with `conflictTarget: true` are silently allowed — they represent intentional conflict-row testing and will not trigger a uniqueness error.
 
-#### `enum`
+#### `ENUM`
 
 The value must be one of a declared set of strings.
 
 ```yaml  
 constraints:  
-  - type: enum    values: ["ACTIVE", "PENDING", "CLOSED"]    message: "status must be ACTIVE, PENDING, or CLOSED"  
+  - constraint: ENUM    
+    values: ["ACTIVE", "PENDING", "CLOSED"]    
+    message: "status must be ACTIVE, PENDING, or CLOSED"  
 ```  
 
-#### `pattern`
+#### `PATTERN`
 
 The string value must match a regular expression.
 
 ```yaml  
 constraints:  
-  - type: pattern    regex: "^[a-zA-Z0-9_]{3,50}$"    message: "username must be 3-50 alphanumeric characters or underscores"  
+  - constraint: PATTERN    
+    regex: "^[a-zA-Z0-9_]{3,50}$"    
+    message: "username must be 3-50 alphanumeric characters or underscores"  
 ```  
 
 The regex is matched with `containsMatchIn` (substring match). Use `^` and `$` anchors for a full-string match.
 
-#### `temporal`
+#### `TEMPORAL`
 
 Validates that a `TIMESTAMP` or `DATE` value falls within acceptable time bounds.
 
 ```yaml  
 constraints:  
-  - type: temporal    notFuture: true        # rejects timestamps after validation time    notPast: "-P4Y"        # rejects timestamps older than 4 years (ISO 8601 negative period)  
+  - constraint: TEMPORAL    
+    notFuture: true        # rejects timestamps after validation time    
+    notPast: "-P4Y"        # rejects timestamps older than 4 years (ISO 8601 negative period)  
 ```  
 
-| Option | Type | Description |  
-|--------|------|-------------|  
-| `notFuture` | boolean | If `true`, values after the current timestamp are an **ERROR**. |  
-| `notPast` | string | ISO 8601 negative duration (e.g. `-P4Y`, `-P6M`, `-P1Y6M`). Values older than this boundary are a **WARNING** (advisory, does not block generation). |  
+| Option | DataType | Description |  
+|--------|----------|-------------|  
+| `notFuture` | boolean  | If `true`, values after the current timestamp are an **ERROR**. |  
+| `notPast` | string   | ISO 8601 negative duration (e.g. `-P4Y`, `-P6M`, `-P1Y6M`). Values older than this boundary are a **WARNING** (advisory, does not block generation). |  
 
 > **Temporal severity**: `notFuture` violations are **errors**. `notPast` violations are **warnings** — they flag stale data without blocking generation.
 
@@ -318,16 +360,18 @@ A `foreignKey` block on a column declares a reference to a column in another tab
 
 ```yaml  
 - name: user_id  
-  type: INTEGER  foreignKey:    schema: my_app      # optional — inherits root schema if omitted    table: users    columns: [id]       # referenced column(s) in parent table    onUpdate: cascade   # optional    onDelete: noAction  # optional  
+  datatype: INTEGER  
+  foreignKey:    
+  schema: my_app      # optional — inherits root schema if omitted    table: users    columns: [id]       # referenced column(s) in parent table    onUpdate: cascade   # optional    onDelete: noAction  # optional  
 ```  
 
-| Field | Type | Required | Description |  
-|-------|------|----------|-------------|  
-| `schema` | string | No | Schema qualifier. Inherits the root `schema` if omitted. |  
-| `table` | string | Yes | Parent table name. |  
-| `columns` | array | Yes | Referenced column name(s) in the parent table. |  
-| `onUpdate` | string | No | One of: `cascade`, `setNull`, `setDefault`, `restrict`, `noAction` (default). |  
-| `onDelete` | string | No | Same values as `onUpdate`. |  
+| Field | DataType | Required | Description |  
+|-------|----------|----------|-------------|  
+| `schema` | string   | No | Schema qualifier. Inherits the root `schema` if omitted. |  
+| `table` | string   | Yes | Parent table name. |  
+| `columns` | array    | Yes | Referenced column name(s) in the parent table. |  
+| `onUpdate` | string   | No | One of: `cascade`, `setNull`, `setDefault`, `restrict`, `noAction` (default). |  
+| `onDelete` | string   | No | Same values as `onUpdate`. |  
 
 > **Runtime FK validation**: When Knoppen loads data, it checks that every non-null FK value appears in the corresponding parent table's loaded data rows. A missing parent row is an **ERROR**. A missing parent table (no `files:` declared for it) is a **WARNING**.
 >
@@ -344,16 +388,18 @@ onConflict:
   target: [id]              # column(s) in ON CONFLICT (...) clause  action: update            # or doNothing  excludeFromUpdate:        # columns never overwritten on conflict    - id    - created_at  
 ```  
 
-| Field | Type | Required | Description |  
-|-------|------|----------|-------------|  
-| `target` | array | Yes | Column(s) used in `ON CONFLICT (col, ...)`. Usually the PK, but can be a unique constraint. |  
-| `action` | string | Yes | `update` → `DO UPDATE SET ...` for every non-excluded column. `doNothing` → `DO NOTHING`. |  
-| `excludeFromUpdate` | array | No | Columns omitted from the `DO UPDATE SET` clause. Use this to protect immutable fields like creation timestamps or surrogate PKs. |  
+| Field | DataType | Required | Description |  
+|-------|----------|----------|-------------|  
+| `target` | array    | Yes | Column(s) used in `ON CONFLICT (col, ...)`. Usually the PK, but can be a unique constraint. |  
+| `action` | string   | Yes | `update` → `DO UPDATE SET ...` for every non-excluded column. `doNothing` → `DO NOTHING`. |  
+| `excludeFromUpdate` | array    | No | Columns omitted from the `DO UPDATE SET` clause. Use this to protect immutable fields like creation timestamps or surrogate PKs. |  
 
 **Example: protect created_at and id on conflict:**
 ```yaml  
 onConflict:  
-  target: [id]  action: update  excludeFromUpdate: [id, created_at]  
+  target: [id]  
+  action: update  
+  excludeFromUpdate: [id, created_at]  
 ```  
 Generates:
 ```sql  
@@ -375,7 +421,7 @@ onConflict:
 
 ## 5. Generators Reference
 
-Generators are column value producers evaluated by Knoppen in Kotlin before SQL is written. They are declared as a column `default` with `type: GENERATOR`.
+Generators are column value producers evaluated by Knoppen in Kotlin before SQL is written. They are declared as a column `default` with `kind: GENERATOR`.
 
 A generator is only invoked when the data file row **omits** that column. If the row supplies a value, the generator is bypassed.
 
@@ -387,14 +433,15 @@ Produces an incrementing numeric series.
 
 ```yaml  
 default:  
-  type: GENERATOR  value: "SEQUENCE(start, step)"  # or  value: "SEQUENCE(start, step, suffix)"  
+  kind: GENERATOR  
+  value: "SEQUENCE(start, step)"  # or  value: "SEQUENCE(start, step, suffix)"  
 ```  
 
-| Argument | Type | Description |  
-|----------|------|-------------|  
-| `start` | integer | First value |  
-| `step` | integer | Increment per row (must not be zero; negative values count down) |  
-| `suffix` | string | Optional string appended to each value |  
+| Argument | DataType | Description |  
+|----------|----------|-------------|  
+| `start` | integer  | First value |  
+| `step` | integer  | Increment per row (must not be zero; negative values count down) |  
+| `suffix` | string   | Optional string appended to each value |  
 
 Examples:
 
@@ -410,7 +457,8 @@ Shorthand for `SEQUENCE(start, 1)` — increments by 1 each row.
 
 ```yaml  
 default:  
-  type: GENERATOR  value: "COUNTER(1)"    # → 1, 2, 3, 4, ...  
+  kind: GENERATOR  
+  value: "COUNTER(1)"    # → 1, 2, 3, 4, ...  
 ```  
 
 ### TEMPLATE
@@ -419,7 +467,8 @@ Produces a string by filling named placeholders in a pattern.
 
 ```yaml  
 default:  
-  type: GENERATOR  value: "TEMPLATE(USR-{yyyyMMdd}-{rownum:03d})"  
+  kind: GENERATOR  
+  value: "TEMPLATE(USR-{yyyyMMdd}-{rownum:03d})"  
 ```  
 
 Available placeholders:
@@ -444,7 +493,8 @@ Produces timestamps offset from "now" by an incrementing multiple of a time unit
 
 ```yaml  
 default:  
-  type: GENERATOR  value: "TIMESTAMP_OFFSET(unit, step)"  
+  kind: GENERATOR  
+  value: "TIMESTAMP_OFFSET(unit, step)"  
 ```  
 
 | Argument | Values | Description |  
@@ -466,7 +516,8 @@ Generates a random UUID v4 for each row.
 
 ```yaml  
 default:  
-  type: GENERATOR  value: "UUID()"  
+  kind: GENERATOR  
+  value: "UUID()"  
 ```  
 
 Output: `'550e8400-e29b-41d4-a716-446655440000'`
@@ -477,7 +528,8 @@ Cycles through a fixed list of values indefinitely.
 
 ```yaml  
 default:  
-  type: GENERATOR  value: "CYCLE(PENDING, ACTIVE, CLOSED)"  
+  kind: GENERATOR  
+  value: "CYCLE(PENDING, ACTIVE, CLOSED)"  
 ```  
 
 | Row | Value |  
@@ -496,7 +548,8 @@ Distributes values proportionally across rows based on percentage weights. **Wei
 
 ```yaml  
 default:  
-  type: GENERATOR  value: "DISTRIBUTE(70:ACTIVE, 20:PENDING, 10:CLOSED)"  
+  kind: GENERATOR  
+  value: "DISTRIBUTE(70:ACTIVE, 20:PENDING, 10:CLOSED)"  
 ```  
 
 For 10 rows: 7 × `ACTIVE`, 2 × `PENDING`, 1 × `CLOSED`. Values are interleaved (not grouped) using the largest-remainder method. Requires at least 2 weight:value pairs.
@@ -507,7 +560,8 @@ Cycles through values that were generated (or loaded) for another table's column
 
 ```yaml  
 default:  
-  type: GENERATOR  value: "FOREIGN_CYCLE(users, id)"  
+  kind: GENERATOR  
+  value: "FOREIGN_CYCLE(users, id)"  
 ```  
 
 This reads all `id` values that were produced for the `users` table and cycles through them. The parent table must appear **before** the current table in declaration order (Knoppen processes tables in topological dependency order, so if FK relationships are declared correctly this is automatic).
@@ -533,9 +587,12 @@ The file must be a **plain YAML list** at the top level. Each list item is a map
 ```yaml  
 # orders.yaml  
 - id: 1  
-  customer_id: 42  amount: 99.99  status: "ACTIVE"  
+  customer_id:  42  
+  amount: 99.99  
+  status: "ACTIVE"  
 - id: 2  
-  customer_id: 43  amount: 149.00  # status omitted — will use schema default if defined  
+  customer_id: 43  
+  amount: 149.00  # status omitted — will use schema default if defined  
 ```  
 
 > **Legacy format**: An older format wrapping the list under a table-name key (`tableName: [...]`) is supported for backwards compatibility but is **not recommended**. New files should use the plain list format shown above.
@@ -545,7 +602,9 @@ The file must be a **plain YAML list** at the top level. Each list item is a map
 **JSONB columns** can use inline YAML objects or JSON-style strings:
 ```yaml  
 - id: 1  
-  metadata:    role: admin    tags: [one, two]  
+  metadata:    
+  role: admin    
+  tags: [one, two]  
 ```  
 
 ### 6.2 JSON
@@ -592,7 +651,11 @@ A table can load from more than one file. List all files under `files:`:
 
 ```yaml  
 - tableName: users  
-  files:    - users_base.yaml    - users_extra.csv    - users_admin.json  primaryKey: [id]  ...  
+  files:    
+     - users_base.yaml    
+     - users_extra.csv    
+     - users_admin.json  
+  primaryKey: [id]  ...  
 ```  
 
 Files are loaded and merged in the order listed. Rows from later files are appended after rows from earlier files.
@@ -647,7 +710,11 @@ Exit code `1` = one or more errors found.
 Runs everything `validate` does, then generates SQL and writes it to the output file.
 
 ```bash  
-knoppen generate myschema.yamlknoppen generate myschema.yaml --output /tmp/seed.sqlknoppen generate myschema.yaml --output seed.sql --no-strict --root-data-path /data
+knoppen generate myschema.yaml
+```
+
+```bash 
+knoppen generate myschema.yaml --output /tmp/seed.sqlknoppen generate myschema.yaml --output seed.sql --no-strict --root-data-path /data
 ```  
 
 Exit code `0` = SQL written successfully (warnings are allowed).    
@@ -783,24 +850,24 @@ tables:
 
     columns:
       - name: id
-        type: INTEGER
+        datatype: INTEGER
         constraints:
-          - type: required
+          - constraint: REQUIRED
 
       - name: name
-        type: VARCHAR(100)
+        datatype: VARCHAR(100)
         constraints:
-          - type: required
-          - type: unique
+          - constraint: REQUIRED
+          - constraint: UNIQUE
             conflictTarget: false
-          - type: pattern
+          - constraint: PATTERN
             regex: "^[A-Za-z ]+$"
             message: "category name must contain only letters and spaces"
 
       - name: display_order
-        type: INTEGER
+        datatype: INTEGER
         default:
-          type: GENERATOR
+          kind: GENERATOR
           value: "SEQUENCE(10, 10)"
 
   # ── Main content table ────────────────────────────
@@ -820,47 +887,47 @@ tables:
 
     columns:
       - name: id
-        type: INTEGER
+        datatype: INTEGER
         constraints:
-          - type: required
+          - constraint: REQUIRED
 
       - name: category_id
-        type: INTEGER
+        datatype: INTEGER
         foreignKey:
           table: category
           columns: [id]
           onUpdate: cascade
         constraints:
-          - type: required
+          - constraint: REQUIRED
 
       - name: title
-        type: VARCHAR(200)
+        datatype: VARCHAR(200)
         constraints:
-          - type: required
-          - type: pattern
+          - constraint: REQUIRED
+          - constraint: PATTERN
             regex: "^.{1,200}$"
             message: "title must be between 1 and 200 characters"
 
       - name: status
-        type: VARCHAR(20)
+        datatype: VARCHAR(20)
         constraints:
-          - type: enum
+          - constraint: ENUM
             values: ["DRAFT", "PUBLISHED", "ARCHIVED"]
             message: "status must be DRAFT, PUBLISHED, or ARCHIVED"
         default:
-          type: LITERAL
+          kind: LITERAL
           value: "DRAFT"
 
       - name: created_at
-        type: TIMESTAMP
+        datatype: TIMESTAMP
         default:
-          type: FUNCTION
+          kind: FUNCTION
           value: CURRENT_TIMESTAMP
 
       - name: slug
-        type: VARCHAR(200)
+        datatype: VARCHAR(200)
         default:
-          type: GENERATOR
+          kind: GENERATOR
           value: "TEMPLATE(article-{rownum:03d}-{yyyyMMdd})"
 ```  
 
@@ -880,11 +947,16 @@ tables:
 
 ```yaml  
 - id: 1001  
-  category_id: 1  title: "Introduction to Databases"  status: "PUBLISHED"  # created_at → CURRENT_TIMESTAMP  # slug generated: article-001-20260625  
+  category_id: 1  
+  title: "Introduction to Databases"  
+  status: "PUBLISHED"  # created_at → CURRENT_TIMESTAMP  # slug generated: article-001-20260625  
 - id: 1002  
-  category_id: 2  title: "The Science of Sleep"  # status omitted → LITERAL default → 'DRAFT'  # slug generated: article-002-20260625  
+  category_id: 2  
+  title: "The Science of Sleep"  # status omitted → LITERAL default → 'DRAFT'  # slug generated: article-002-20260625  
 - id: 1003  
-  category_id: 1  title: "Advanced SQL Queries"  status: "PUBLISHED"  
+  category_id: 1  
+  title: "Advanced SQL Queries"  
+  status: "PUBLISHED"  
 # ── Conflict row: update title of article 1002 ────  
 - id: 1002  
   category_id: 2                    # preserved (excludeFromUpdate)  title: "The Science of Sleep - Revised"  status: "PUBLISHED"  
@@ -950,7 +1022,7 @@ psql -h localhost -U myuser -d mydb -f /tmp/blog_seed.sql
 ### Schema
 
 - **Column names** must match `^[A-Za-z0-9_]+$`. Quoted identifiers with special characters are not supported.
-- **Type strings** must be uppercase: `INTEGER`, `VARCHAR(30)`, `NUMERIC(8,2)`. Lowercase types like `int` or `varchar(30)` will fail JSON schema validation.
+- **DataType strings** must be uppercase: `INTEGER`, `VARCHAR(30)`, `NUMERIC(8,2)`. Lowercase datatypes like `int` or `varchar(30)` will fail JSON schema validation.
 - **No schema inheritance or includes.** Each schema file is fully self-contained. There is no way to share a common base schema between multiple schema files.
 - **Cyclic FK dependencies** cause an immediate error with no partial output.
 - **`onConflict` is all-or-nothing.** You cannot define per-column conflict-resolution logic beyond `excludeFromUpdate`. There is no support for `DO UPDATE SET col = col + EXCLUDED.col` style expressions.

@@ -67,5 +67,7 @@ Add to your `pom.xml`:
         <sequencePrefix>seq_</sequencePrefix>
       </configuration>
     </plugin>
-
+  </plugins>
+</build>
 ```
+

@@ -4,6 +4,7 @@ import org.austindroids.knoppen.schema.ColumnSchema
 import org.austindroids.knoppen.schema.DefaultType
 import org.austindroids.knoppen.schema.DefaultValue
 import org.austindroids.knoppen.schema.OnConflictAction
+import org.austindroids.knoppen.schema.SqlType
 import org.austindroids.knoppen.schema.TableSchema
 import org.austindroids.knoppen.sqlgen.DataRow
 import org.austindroids.knoppen.sqlgen.SqlDialect
@@ -38,7 +39,7 @@ class PostgresDialect : SqlDialect {
         // GENERATOR columns are always resolved before this point and will be
         // present in row.fields — they must never fall through to renderDefault().
         val insertColumns = schema.columns.filter { col ->
-            row.fields.containsKey(col.name) || (col.default != null && col.default.type != DefaultType.GENERATOR)
+            row.fields.containsKey(col.name) || (col.default != null && col.default.kind != DefaultType.GENERATOR)
         }
 
         if (insertColumns.isEmpty()) {
@@ -51,12 +52,13 @@ class PostgresDialect : SqlDialect {
         val columnList = insertColumns.joinToString(",\n    ") { qq(it.name) }
 
         val valueList  = insertColumns.joinToString(",\n    ") { col ->
+            val sqlType  = SqlType.parse(col.datatype)
             val rawValue = row.fields[col.name]
             if (rawValue == null && !row.fields.containsKey(col.name)) {
                 // Column absent from row — use schema default
-                renderDefault(col.default!!, col.type)
+                renderDefault(col.default!!, sqlType)
             } else {
-                formatValue(rawValue, col.type)
+                formatValue(rawValue, sqlType)
             }
         }
 
@@ -131,57 +133,72 @@ class PostgresDialect : SqlDialect {
     // Value formatting
     // ─────────────────────────────────────────────────────────────────────────
 
-    override fun formatValue(value: Any?, columnType: String): String {
+    override fun formatValue(value: Any?, sqlType: SqlType): String {
         if (value == null) return "NULL"
 
-        val baseType = columnType.uppercase().substringBefore("(").trim()
-
-        return when (baseType) {
-            "INTEGER", "INT", "BIGINT" -> {
+        return when (sqlType) {
+            is SqlType.Integral -> {
                 val n = value.toString().trim()
-                requireNotNull(n.toLongOrNull()) {
-                    "Cannot format '$n' as $baseType"
-                }
+                requireNotNull(n.toLongOrNull()) { "Cannot format '$n' as ${sqlType.toDdl()}" }
                 n
             }
 
-            "NUMERIC", "DECIMAL" -> {
+            is SqlType.Decimal, is SqlType.Numeric -> {
                 val n = value.toString().trim()
-                requireNotNull(n.toBigDecimalOrNull()) {
-                    "Cannot format '$n' as $baseType"
-                }
+                requireNotNull(n.toBigDecimalOrNull()) { "Cannot format '$n' as ${sqlType.toDdl()}" }
                 n
             }
 
-            "BOOLEAN" ->
+            is SqlType.Floating ->
+                value.toString().trim()
+
+            is SqlType.BooleanType ->
                 when (value.toString().lowercase()) {
                     "true",  "yes", "1" -> "TRUE"
                     "false", "no",  "0" -> "FALSE"
-                    else -> throw IllegalArgumentException(
-                        "Cannot format '${value}' as BOOLEAN"
-                    )
+                    else -> throw IllegalArgumentException("Cannot format '$value' as BOOLEAN")
                 }
 
-            "TEXT", "VARCHAR" ->
-                // Escape single quotes by doubling them
+            is SqlType.StringType ->
                 "'" + value.toString().replace("'", "''") + "'"
 
-            "JSONB" ->
-                // value may be a Map/List (from YAML) or already a JSON string
+            is SqlType.JsonB ->
                 "'" + toJsonString(value).replace("'", "''") + "'::jsonb"
 
-            "JSON" ->
+            is SqlType.Json ->
                 "'" + toJsonString(value).replace("'", "''") + "'::json"
 
-            "TIMESTAMP" ->
-                // Normalize to ISO-8601 and cast
-                "'" + normalizeTimestamp(value.toString()) + "'::timestamp"
+            is SqlType.Temporal -> when (sqlType) {
+                is SqlType.Timestamp, is SqlType.DateTime ->
+                    "'" + normalizeTimestamp(value.toString()) + "'::timestamp"
+                is SqlType.TimestampTz ->
+                    "'" + normalizeTimestamp(value.toString()) + "'::timestamptz"
+                is SqlType.Date ->
+                    "'" + value.toString().trim() + "'::date"
+                is SqlType.Time ->
+                    "'" + value.toString().trim() + "'::time"
+                is SqlType.Year ->
+                    value.toString().trim()
+            }
 
-            "DATE" ->
-                "'" + value.toString().trim() + "'::date"
+            is SqlType.ByteA ->
+                "'" + value.toString().replace("'", "''") + "'"
 
-            else ->
-                // Unknown type — render as a quoted string and let Postgres decide
+            is SqlType.Blob ->
+                "'" + value.toString().replace("'", "''") + "'"
+
+            is SqlType.Uuid ->
+                "'" + value.toString().replace("'", "''") + "'"
+
+            is SqlType.PgSpecific -> when (sqlType) {
+                is SqlType.Money    -> "'" + value.toString().replace("'", "''") + "'::money"
+                is SqlType.Inet     -> "'" + value.toString().replace("'", "''") + "'::inet"
+                is SqlType.Cidr     -> "'" + value.toString().replace("'", "''") + "'::cidr"
+                is SqlType.Interval -> "'" + value.toString().replace("'", "''") + "'::interval"
+                is SqlType.TimeTz   -> "'" + value.toString().trim() + "'::timetz"
+            }
+
+            is SqlType.Unknown ->
                 "'" + value.toString().replace("'", "''") + "'"
         }
     }
@@ -202,16 +219,16 @@ class PostgresDialect : SqlDialect {
      *  - [DefaultType.EXPRESSION] → rendered as-is,    e.g. '[]'::jsonb
      *  - [DefaultType.LITERAL]    → rendered quoted,   e.g. 'active'
      */
-    private fun renderDefault(default: DefaultValue, columnType: String): String =
-        when (default.type) {
+    private fun renderDefault(default: DefaultValue, sqlType: SqlType): String =
+        when (default.kind) {
             DefaultType.FUNCTION -> {
                 val args = default.args.joinToString(", ")
                 if (args.isBlank()) default.value else "${default.value}($args)"
             }
             DefaultType.EXPRESSION -> default.value
-            DefaultType.LITERAL    -> formatValue(default.value, columnType)
+            DefaultType.LITERAL    -> formatValue(default.value, sqlType)
             DefaultType.GENERATOR  -> throw IllegalStateException(
-                "GENERATOR default for column type '$columnType' reached renderDefault() " +
+                "GENERATOR default for column '${sqlType.toDdl()}' reached renderDefault() " +
                         "— generator values must be resolved by UpsertGenerator before " +
                         "generateUpsert() is called. Check that the column is included in " +
                         "the generators map and that GeneratorParser.parse() was invoked for it."

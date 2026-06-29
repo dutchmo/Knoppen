@@ -1,6 +1,6 @@
 package org.austindroids.knoppen.sqlgen
 
-
+import org.austindroids.knoppen.schema.SqlType
 import org.austindroids.knoppen.schema.TableSchema
 
 /**
@@ -31,5 +31,5 @@ interface SqlDialect {
      * Formats a Kotlin/YAML value for embedding in a SQL literal.
      * Implementations must handle quoting, escaping, and type casting.
      */
-    fun formatValue(value: Any?, columnType: String): String
+    fun formatValue(value: Any?, sqlType: SqlType): String
 }

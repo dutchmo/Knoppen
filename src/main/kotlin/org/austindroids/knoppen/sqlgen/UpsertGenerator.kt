@@ -239,7 +239,7 @@ class UpsertGenerator(
             for ((localIdx, row) in loadResult.rows.withIndex()) {
                 val globalIdx = localIdx + rowOffset
                 val pkKey = tableSchema.primaryKey.joinToString(",") { colName ->
-                    row.get(colName)?.asText() ?: "null"
+                    row.get(colName)?.asString() ?: "null"
                 }
                 if (pkKey in pkValuesFromPreviousFiles) {
                     errors.add(DataValidationError(
@@ -279,7 +279,7 @@ class UpsertGenerator(
             val rows = allRows[tableSchema.tableName] ?: continue
 
             val generators: Map<String, ColumnGenerator> = tableSchema.columns
-                .filter { col -> col.default?.type == DefaultType.GENERATOR }
+                .filter { col -> col.default?.kind == DefaultType.GENERATOR }
                 .associate { col ->
                     col.name to GeneratorParser.parse(
                         expression       = col.default!!.value,

@@ -53,8 +53,7 @@ dependencies {
     // Jackson YAML Module
     implementation("tools.jackson.dataformat:jackson-dataformat-yaml")
     // Jackson Java 8 Time module — use 2.x version (compatible with 3.x)
-    //implementation("tools.jackson.datatype:jackson-datatype-jsr310")  // version from BOM
-
+    // implementation("tools.jackson.datatype:jackson-datatype-jsr310")  // version from BOM
 
     // CSV
     implementation("com.jsoizo:kotlin-csv-jvm:2.0.0")
@@ -71,24 +70,35 @@ dependencies {
     implementation("org.slf4j:slf4j-api:2.0.18")
     // implementation("ch.qos.logback:logback-classic:1.5.34")
 
-
     // CLI
 
     // --- Clikt (command parsing) ---
-    implementation("com.github.ajalt.clikt:clikt:5.1.0")
+    implementation("com.github.ajalt.clikt:clikt:5.1.0") {
+        exclude("com.github.ajalt.mordant", "mordant-jvm-jna")
+    }
     // optional: markdown rendering in help messages
     // implementation("com.github.ajalt.clikt:clikt-markdown:5.1.0")
 
     // --- Mordant (terminal output) ---
-    implementation("com.github.ajalt.mordant:mordant:3.0.2")
+    //implementation("com.github.ajalt.mordant:mordant-jvm-ffm:3.0.2")
+     //implementation("com.github.ajalt.mordant:mordant-core:3.0.2")
+    // implementation("com.github.ajalt.mordant:mordant:3.0.2")
     // optional: coroutine-based animations (progress bars, spinners, etc.)
     // implementation("com.github.ajalt.mordant:mordant-coroutines:3.0.2")
     // optional: render Markdown in terminal output
     // implementation("com.github.ajalt.mordant:mordant-markdown:3.0.2")
 
+// mordant-core: no native deps, but raw mode & terminal size detection won't work
+    //implementation("com.github.ajalt.mordant:mordant-core:${mordantVersion}")
+// mordant-jvm-ffm: uses Java FFM API, JDK 22+ required, AND you must add
+//   --enable-native-access=ALL-UNNAMED to your java command line
+//    implementation("com.github.ajalt.mordant:mordant-jvm-ffm:${mordantVersion}")
+// mordant-jvm-jna: uses JNA, supports all Java versions, but requires
+//   linking to a bundled native library (what you have now)
+//    implementation("com.github.ajalt.mordant:mordant-jvm-jna:${mordantVersion}")
 
-    //testImplementation(kotlin("test"))
-    //implementation(platform("org.junit:junit-bom:$junitver"))
+    // testImplementation(kotlin("test"))
+    // implementation(platform("org.junit:junit-bom:$junitver"))
     // testImplementation("org.junit.jupiter:junit-jupiter")
     // testImplementation("org.junit.jupiter:junit-jupiter-params")
     // testImplementation("org.mockito.kotlin:mockito-kotlin:$mockitoKotlinVer")
@@ -129,7 +139,8 @@ tasks.processResources {
     inputs.property("version", project.version.toString())
     inputs.property("appName", rootProject.name)
     filesMatching("version.properties") {
-        expand(mapOf(
+        expand(
+            mapOf(
             "version" to project.version.toString(),
             "appName" to rootProject.name
         ))
@@ -144,7 +155,7 @@ tasks.jar {
     manifest {
         attributes(
             "Main-Class" to "org.austindroids.MainKt",
-            "Implementation-Version" to project.version
+            "Implementation-Version" to project.version,
         )
     }
 }
@@ -158,11 +169,36 @@ tasks.shadowJar {
 
     // Exclude signature files from dependency JARs (they break fat JARs)
     exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA")
-
+    // needed for Mordant
+    manifest {
+        attributes(
+            "Main-Class" to "org.austindroids.MainKt",
+            "Implementation-Version" to project.version,
+            "Enable-Native-Access" to "ALL-UNNAMED"   // ← this works per JEP 472
+        )
+    }
     // Relocate if you ever have classpath conflicts:
     // relocate("com.fasterxml.jackson", "shadow.com.fasterxml.jackson")
 }
 
+// Make distribution & script tasks wait for the shadow JAR
+// After your tasks.shadowJar block...
+afterEvaluate {
+    tasks.matching { it.name.startsWith("startShadowScripts") }.configureEach {
+        dependsOn(tasks.jar)
+    }
+    tasks.matching { it.name.startsWith("distShadow") }.configureEach {
+        dependsOn(tasks.shadowJar)
+    }
+    tasks.named("distZip") { dependsOn(tasks.shadowJar) }
+    tasks.named("distTar") { dependsOn(tasks.shadowJar) }
+    tasks.named("startScripts") { dependsOn(tasks.shadowJar) }
+}
+
+
+tasks.run {
+    dependsOn(tasks.shadowJar)
+}
 
 tasks.test {
     useJUnitPlatform()
@@ -180,7 +216,7 @@ tasks.jacocoTestReport {
     }
 }
 
-kotest {customGradleTask = true}
+kotest { customGradleTask = true }
 
 dokka {
     moduleName.set("Knoppen")

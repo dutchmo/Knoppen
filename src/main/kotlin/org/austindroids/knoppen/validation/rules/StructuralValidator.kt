@@ -30,7 +30,7 @@ class StructuralValidator(private val jsonSchemaContent: String) {
 
         errors.forEach { error ->
             // instanceLocation is the JSON Pointer to the failing node
-            // e.g. "/tables/0/columns/2/type"
+            // e.g. "/tables/0/columns/2/datatype"
             val path = error.instanceLocation?.toString() ?: "/"
 
             val detail = buildString {

@@ -44,7 +44,7 @@ class YamlDataFileLoader : DataFileLoader {
                     JsonToken.START_OBJECT -> {
                         when {
                             pendingField != null -> {
-                                pathStack.addLast(pendingField!!)
+                                pathStack.addLast(pendingField)
                                 pendingField = null
                             }
                             containerStack.lastOrNull() == ContainerType.ARRAY -> {
@@ -58,7 +58,7 @@ class YamlDataFileLoader : DataFileLoader {
 
                     JsonToken.START_ARRAY -> {
                         if (pendingField != null) {
-                            pathStack.addLast(pendingField!!)
+                            pathStack.addLast(pendingField)
                             pendingField = null
                         }
                         lineMap[currentPath()] = line

@@ -11,6 +11,7 @@ import org.austindroids.knoppen.schema.DatabaseSchema
 import org.austindroids.knoppen.schema.EnumConstraint
 import org.austindroids.knoppen.schema.PatternConstraint
 import org.austindroids.knoppen.schema.RequiredConstraint
+import org.austindroids.knoppen.schema.SqlType
 import org.austindroids.knoppen.schema.TableSchema
 import org.austindroids.knoppen.schema.TemporalConstraint
 import org.austindroids.knoppen.schema.UniqueConstraint
@@ -30,7 +31,7 @@ import tools.jackson.databind.node.StringNode
  * Validates every row in a single table's loaded data against its [TableSchema].
  *
  * Checks performed per row:
- *  1. Unknown fields — WARNING (escalated to ERROR when [ValidationConfig.strictFields] is true)
+ *  1. Unknown fields — WARNING (escalated to ERROR when [org.austindroids.knoppen.schema.ValidationConfig.strictFields] is true)
  *  2. Required fields present and non-null — ERROR
  *  3. Type compatibility — ERROR
  *  4. Per-column constraints (enum, pattern, temporal, unique) — ERROR or WARNING
@@ -145,46 +146,81 @@ class DataFileValidator(
     // ─────────────────────────────────────────────────────────────────────────
 
     private fun validateType(rowIndex: Int, col: ColumnSchema, value: JsonNode, line: Int?) {
-        val rawType = col.type.uppercase().substringBefore("(").trim()
-        val typeMismatch: String? = when (rawType) {
-            "INTEGER", "INT", "BIGINT" ->
+
+        val sqlType = SqlType.parse(col.datatype)
+        val typeMismatch: String? = when (sqlType) {
+            is SqlType.Integral ->
                 if (!value.isNumber || value.isFloatingPointNumber)
-                    "Expected integer, got ${nodeTypeName(value)}: '${value.asText()}'"
+                    "Expected integer, got ${nodeTypeName(value)}: '${value.asString()}'"
                 else null
 
-            "NUMERIC", "DECIMAL" ->
+            is SqlType.Decimal, is SqlType.Numeric ->
                 if (!value.isNumber)
-                    "Expected numeric, got ${nodeTypeName(value)}: '${value.asText()}'"
+                    "Expected numeric, got ${nodeTypeName(value)}: '${value.asString()}'"
                 else null
 
-            "BOOLEAN" ->
+            is SqlType.Floating ->
+                if (!value.isNumber)
+                    "Expected number, got ${nodeTypeName(value)}: '${value.asString()}'"
+                else null
+
+            is SqlType.StringType ->
+                if (!value.isString)
+                    "Expected text, got ${nodeTypeName(value)}: '${value.asString()}'"
+                else null
+
+            is SqlType.BooleanType ->
                 if (!value.isBoolean)
-                    "Expected boolean, got ${nodeTypeName(value)}: '${value.asText()}'"
+                    "Expected boolean, got ${nodeTypeName(value)}: '${value.asString()}'"
                 else null
 
-            "TEXT", "VARCHAR" ->
-                if (!value.isTextual)
-                    "Expected text, got ${nodeTypeName(value)}: '${value.asText()}'"
-                else null
-
-            "JSONB", "JSON" ->
-                if (!value.isObject && !value.isArray && !value.isTextual)
+            is SqlType.Json, is SqlType.JsonB ->
+                if (!value.isObject && !value.isArray && !value.isString)
                     "Expected JSON object, array, or text, got ${nodeTypeName(value)}"
                 else null
 
-            "TIMESTAMP", "DATE" ->
-                if (!value.isTextual)
-                    "Expected timestamp string, got ${nodeTypeName(value)}: '${value.asText()}'"
-                else
-                    parseTimestamp(value.asText())
-                        ?.let { "Cannot parse '${value.asText()}' as $rawType: $it" }
+            is SqlType.Temporal -> when (sqlType) {
+                is SqlType.Timestamp, is SqlType.TimestampTz, is SqlType.DateTime ->
+                    if (!value.isString)
+                        "Expected timestamp string, got ${nodeTypeName(value)}: '${value.asString()}'"
+                    else
+                        parseTimestamp(value.asString())
+                            ?.let { "Cannot parse '${value.asString()}' as ${sqlType.toDdl()}: $it" }
 
-            else -> null
+                is SqlType.Date, is SqlType.Time, is SqlType.Year ->
+                    if (!value.isString)
+                        "Expected string, got ${nodeTypeName(value)}: '${value.asString()}'"
+                    else null
+            }
+
+            is SqlType.ByteA, is SqlType.Blob ->
+                if (!value.isString)
+                    "Expected binary string, got ${nodeTypeName(value)}: '${value.asString()}'"
+                else null
+
+            is SqlType.Uuid ->
+                if (!value.isString)
+                    "Expected UUID string, got ${nodeTypeName(value)}: '${value.asString()}'"
+                else null
+
+            is SqlType.PgSpecific -> when (sqlType) {
+                is SqlType.Money ->
+                    if (!value.isString && !value.isNumber)
+                        "Expected string or number, got ${nodeTypeName(value)}: '${value.asString()}'"
+                    else null
+
+                is SqlType.Inet, is SqlType.Cidr, is SqlType.Interval, is SqlType.TimeTz ->
+                    if (!value.isString)
+                        "Expected string, got ${nodeTypeName(value)}: '${value.asString()}'"
+                    else null
+            }
+
+            is SqlType.Unknown -> null
         }
 
         if (typeMismatch != null) {
             addError(rowIndex, col.name, line,
-                "Type mismatch for column '${col.name}' (declared ${col.type}): $typeMismatch")
+                "Type mismatch for column '${col.name}' (declared ${col.datatype}): $typeMismatch")
         }
     }
 
@@ -199,7 +235,7 @@ class DataFileValidator(
         constraint: UniqueConstraint,
         line: Int?
     ) {
-        val key  = value.asText()
+        val key  = value.asString()
         val seen = uniqueSets.getOrPut(col.name) { mutableSetOf() }
 
         if (!seen.add(key)) {
@@ -217,7 +253,7 @@ class DataFileValidator(
         constraint: EnumConstraint,
         line: Int?
     ) {
-        val text = value.asText()
+        val text = value.asString()
         if (text !in constraint.values) {
             val allowed  = constraint.values.joinToString(", ") { "'$it'" }
             val message  = constraint.message
@@ -233,8 +269,8 @@ class DataFileValidator(
         constraint: PatternConstraint,
         line: Int?
     ) {
-        if (!value.isTextual) return
-        val text  = value.asText()
+        if (!value.isString) return
+        val text  = value.asString()
         val regex = try { Regex(constraint.regex) } catch (_: Exception) { return }
         if (!regex.containsMatchIn(text)) {
             val message = constraint.message
@@ -250,12 +286,12 @@ class DataFileValidator(
         constraint: TemporalConstraint,
         line: Int?
     ) {
-        if (!value.isTextual) return
+        if (!value.isString) return
 
         val instant: Instant = run {
             var result: Instant? = null
             for (fmt in TIMESTAMP_FORMATTERS) {
-                try { result = OffsetDateTime.parse(value.asText(), fmt).toInstant(); break }
+                try { result = OffsetDateTime.parse(value.asString(), fmt).toInstant(); break }
                 catch (_: DateTimeParseException) {}
             }
             result ?: return
@@ -265,7 +301,7 @@ class DataFileValidator(
 
         if (constraint.notFuture && instant.isAfter(now)) {
             addError(rowIndex, col.name, line,
-                "Value '${value.asText()}' for '${col.name}' is in the future," +
+                "Value '${value.asString()}' for '${col.name}' is in the future," +
                         " but notFuture constraint is set")
         }
 
@@ -278,7 +314,7 @@ class DataFileValidator(
 
             if (instant.isBefore(boundary)) {
                 addError(rowIndex, col.name, line,
-                    "Value '${value.asText()}' for '${col.name}' is older than" +
+                    "Value '${value.asString()}' for '${col.name}' is older than" +
                             " the allowed window ($duration from now)",
                     severity = DataValidationError.Severity.WARNING)
             }
