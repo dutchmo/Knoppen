@@ -33,7 +33,7 @@ tables:
   # ──────────────────────────────────────────────
   - tableName: tag
     description: "Content classification tags"
-    files:
+    dataFiles:
       - tag.yaml
     primaryKey: [id]
 
@@ -69,7 +69,7 @@ tables:
   # ──────────────────────────────────────────────
   - tableName: users
     description: "Users in the system"
-    files:
+    dataFiles:
       - users.yaml
       - users2.yaml
     primaryKey: [id]
@@ -139,7 +139,7 @@ tables:
   # ──────────────────────────────────────────────
   - tableName: post
     description: "User-authored posts"
-    files:
+    dataFiles:
       - post.yaml
     primaryKey: [id]
 
@@ -193,7 +193,7 @@ tables:
   # ──────────────────────────────────────────────
   - tableName: post_tag
     description: "Many-to-many relationship between posts and tags"
-    files:
+    dataFiles:
       - post_tag.yaml
     primaryKey: [post_id, tag_id]
 
@@ -237,7 +237,7 @@ tables:
   # ──────────────────────────────────────────────
   - tableName: audit_log
     description: "Immutable record of system events"
-    files:
+    dataFiles:
       - audit_log.yaml
     primaryKey: [id]
 
@@ -291,7 +291,7 @@ tables:
   # ──────────────────────────────────────────────
   - tableName: post_approval
     description: "Approval decisions made by supervisors on posts"
-    files:
+    dataFiles:
       - post_approval.yaml
     primaryKey: [id]
 

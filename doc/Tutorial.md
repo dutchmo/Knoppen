@@ -25,6 +25,7 @@ Knoppen reads a YAML schema describing your tables and a set of data files (YAML
    - 6.2 [JSON](#62-json)
    - 6.3 [CSV](#63-csv)
    - 6.4 [Splitting a Table Across Multiple Files](#64-splitting-a-table-across-multiple-files)
+   - 6.5 [Output Files](#65-output-files)
 7. [Table Dependency Ordering](#7-table-dependency-ordering)
 8. [CLI Reference](#8-cli-reference)
    - 8.1 [validate](#81-validate)
@@ -70,7 +71,8 @@ Run from the fat JAR (after building):
 | **Data file** | A YAML, JSON, or CSV file containing one table's rows (one table per file). |  
 | **Upsert** | A PostgreSQL `INSERT ... ON CONFLICT` statement that either inserts a new row or updates an existing one. |  
 | **Generator** | A Kotlin-evaluated column value producer (e.g. auto-incrementing numbers, timestamps, FK-cycling IDs). |  
-| **rootDataPath** | A directory path relative to the schema file used as a base for resolving all data file paths. |  
+| **rootDataPath** | A directory path used as a base for resolving all `dataFiles` entries. If declared in the schema it is relative to the schema file's directory; if omitted (and not overridden by the CLI) it defaults to the current working directory. |  
+| **rootOutputPath** | A directory path used as a base for resolving each table's `outputFile`. Same resolution rules as `rootDataPath`. |  
   
 ---  
 
@@ -97,10 +99,11 @@ flowchart TD
    C --> D["Topological Sort<br>FK dependency graph"]
    D -- cycle: stop --> Z3([Exit: cyclic dependency])
 
-   D --> LOOP
+   D --> D2["Path Validation<br>rootDataPath / rootOutputPath exist + writable,<br>each table's dataFiles exist"]
+   D2 --> LOOP
    subgraph LOOP["<span style='font-size:12px; font-weight: bold'>For each table (dependency order)"]
       direction TB
-      F["Resolve data file paths"] --> G["Load Data File<br>YAML / JSON / CSV"]
+      F["Resolve data file paths<br>(skip table if dataFiles is empty)"] --> G["Load Data File<br>YAML / JSON / CSV"]
       G --> H["Structural Validation<br>types, required, constraints"]
       H --> I["Merge rows into table row set"]
    end
@@ -108,12 +111,13 @@ flowchart TD
    I -- more tables --> F
    I -- all tables loaded --> J["FK Integrity Validation<br>cross-table reference check"]
 
+   D2 -.errors accumulate.-> K
    J --> K{"Any hard errors?"}
    K -- yes --> L([Exit: validation failed])
    K -- no, validate --> M([Exit: validation passed])
    K -- no, generate --> N["SQL Generation<br>per row, topological order"]
-   N --> O["Prepend SQL comment header"]
-   O --> P([Write .sql file])
+   N --> O["Group statements by resolved outputFile"]
+   O --> P([Write one .sql file per group])
 
    style Z1 fill:#f88,stroke:#c00
    style Z2 fill:#f88,stroke:#c00
@@ -134,6 +138,7 @@ The schema is a single YAML file. The top-level structure is:
 dialect: postgresql  
 schema: my_schema  
 rootDataPath: ../data       # optional  
+rootOutputPath: ../sql      # optional  
 validation:  
   defaultNullable: true  
   strictFields: false
@@ -147,9 +152,14 @@ validation:
 |-------|------|----------|-------------|  
 | `dialect` | string | Yes | SQL dialect. Currently only `postgresql` is supported. |  
 | `schema` | string | Yes | Database schema namespace (e.g. `public`, `my_app`). Applied as a qualifier in generated SQL: `"my_app"."users"`. Must match `^[A-Za-z0-9_]+$`. |  
-| `rootDataPath` | string | No | Base directory for data file resolution, relative to the schema file's own directory. All `files:` entries in table definitions are resolved against this path. Defaults to the schema file's directory if omitted. |  
+| `rootDataPath` | string | No | Base directory for data file resolution. All `dataFiles:` entries in table definitions are resolved against this path. If declared here, it is relative to the schema file's own directory. If omitted and not overridden by `--root-data-path`, it defaults to the current working directory. |  
+| `rootOutputPath` | string | No | Base directory for generated SQL output. Each table's `outputFile` is resolved against this path. Same resolution rules as `rootDataPath` (schema-relative if declared; otherwise CLI override or current working directory). |  
 | `validation` | object | Yes | Global validation settings (see §4.2). |  
 | `tables` | array | Yes | List of table definitions (at least one required). |  
+
+#### Path Validation
+
+Before any data is loaded, Knoppen checks that the resolved `rootDataPath` and `rootOutputPath` directories both **exist and are writable** — Knoppen never creates them for you. It also checks that every file listed in each table's `dataFiles` exists on disk. All of these checks run to completion and are reported together (they do not stop at the first failure); any failure is an **error** that blocks SQL generation.
 
 ### 4.2 Validation Configuration
 
@@ -169,9 +179,10 @@ validation:
 tables:
   - tableName: orders
     description: "Customer purchase orders"
-    files:
+    dataFiles:
       - orders.yaml
       - orders_extra.csv
+    outputFile: orders.sql
     primaryKey: [id]
     onConflict:
       target: [id]
@@ -187,7 +198,8 @@ tables:
 | ------------- | ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------- | --- |
 | `tableName`   | string           | Yes      | Exact table name as it exists in the database. Must match `^[A-Za-z0-9_]+$`.                                                    |     |
 | `description` | string           | No       | Human-readable description. Not used in SQL output.                                                                             |     |
-| `files`       | array of strings | No       | Data file paths for this table. Each path is resolved against `rootDataPath`. A table with no `files` entries generates no SQL. |     |
+| `dataFiles`   | array of strings | No       | Data file paths for this table. Each path is resolved against `rootDataPath` and must exist. A table with an empty (or omitted) `dataFiles` list is skipped entirely (logged at DEBUG). |     |
+| `outputFile`  | string           | No       | SQL output file name for this table, resolved against `rootOutputPath`. Defaults to `<tableName>.sql` if omitted. If two or more tables declare the same `outputFile`, their generated statements are merged into that one file (logged at DEBUG). |     |
 | `primaryKey`  | array of strings | Yes      | One or more column names forming the primary key. Used for duplicate PK detection across files.                                 |     |
 | `onConflict`  | object           | No       | Conflict-resolution strategy (see §4.9). If omitted, a plain `INSERT` is generated with no conflict clause.                     |     |
 | `columns`     | array            | Yes      | Column definitions (at least one required).                                                                                     |     |
@@ -373,7 +385,7 @@ A `foreignKey` block on a column declares a reference to a column in another tab
 | `onUpdate` | string   | No | One of: `cascade`, `setNull`, `setDefault`, `restrict`, `noAction` (default). |  
 | `onDelete` | string   | No | Same values as `onUpdate`. |  
 
-> **Runtime FK validation**: When Knoppen loads data, it checks that every non-null FK value appears in the corresponding parent table's loaded data rows. A missing parent row is an **ERROR**. A missing parent table (no `files:` declared for it) is a **WARNING**.
+> **Runtime FK validation**: When Knoppen loads data, it checks that every non-null FK value appears in the corresponding parent table's loaded data rows. A missing parent row is an **ERROR**. A missing parent table (no `dataFiles:` declared for it) is a **WARNING**.
 >
 > **Limitation**: Only the **first** entry in `columns` is used for runtime FK integrity checking. Multi-column composite FK references are declared but only the first column is validated against parent row data.
 
@@ -647,11 +659,11 @@ CSV data files do not carry line number information.
 
 ### 6.4 Splitting a Table Across Multiple Files
 
-A table can load from more than one file. List all files under `files:`:
+A table can load from more than one file. List all files under `dataFiles:`:
 
 ```yaml  
 - tableName: users  
-  files:    
+  dataFiles:
      - users_base.yaml    
      - users_extra.csv    
      - users_admin.json  
@@ -661,6 +673,23 @@ A table can load from more than one file. List all files under `files:`:
 Files are loaded and merged in the order listed. Rows from later files are appended after rows from earlier files.
 
 **Cross-file PK duplicate detection**: If the same primary key value appears in two different files, it is flagged as an **ERROR**. Duplicate PKs within a single file are allowed — they represent intentional ON CONFLICT rows for testing upsert behavior.
+
+### 6.5 Output Files
+
+Each table generates SQL into a file resolved from `rootOutputPath` + `outputFile` (or `<tableName>.sql` if `outputFile` is omitted):
+
+```yaml  
+rootOutputPath: ../sql
+
+tables:
+  - tableName: users
+    outputFile: users.sql   # ../sql/users.sql
+  - tableName: post
+    outputFile: users.sql   # merged into the same file, after users' statements
+  - tableName: tag           # outputFile omitted → ../sql/tag.sql
+```  
+
+**Sharing a file across tables**: If two or more tables declare the same `outputFile`, their generated statements are merged into that single file — in topological (dependency) order, not declaration order. This is logged at DEBUG level so it's visible when troubleshooting. Each table's data files and validation are still independent; only the SQL output is combined.
   
 ---  
 
@@ -696,10 +725,12 @@ knoppen <command> SCHEMA [options]
 
 ### 8.1 validate
 
-Runs schema meta-validation, schema deserialization, data file loading, structural validation, and FK integrity checks — but does **not** generate SQL.
+Runs schema meta-validation, schema deserialization, data file loading, structural validation, path validation, and FK integrity checks — but does **not** generate SQL.
 
 ```bash  
-knoppen validate myschema.yamlknoppen validate myschema.yaml --no-strictknoppen validate myschema.yaml --root-data-path /usr/local/test/data
+knoppen validate myschema.yaml
+knoppen validate myschema.yaml --no-strict
+knoppen validate myschema.yaml --root-data-path /usr/local/test/data --root-output-path /tmp/sql
 ```  
 
 Exit code `0` = all checks passed (warnings are allowed).    
@@ -707,14 +738,15 @@ Exit code `1` = one or more errors found.
 
 ### 8.2 generate
 
-Runs everything `validate` does, then generates SQL and writes it to the output file.
+Runs everything `validate` does, then generates SQL and writes one file per table (tables sharing an `outputFile` are merged — see §6.5).
 
 ```bash  
 knoppen generate myschema.yaml
 ```
 
 ```bash 
-knoppen generate myschema.yaml --output /tmp/seed.sqlknoppen generate myschema.yaml --output seed.sql --no-strict --root-data-path /data
+knoppen generate myschema.yaml --root-output-path /tmp/sql
+knoppen generate myschema.yaml --root-output-path /tmp/sql --no-strict --root-data-path /data
 ```  
 
 Exit code `0` = SQL written successfully (warnings are allowed).    
@@ -725,9 +757,9 @@ Exit code `1` = errors found; no SQL file written.
 | Option                     | Default                                            | Description                                                                                                                                                                                 |     |
 | -------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --- |
 | `SCHEMA`                   | — (required)                                       | Path to the schema YAML file. A bare filename (no directory separator) is resolved from the current working directory. A path with `/` or `\` is used as-is.                                |     |
-| `--output`, `-o`           | `<schema-name>.sql` in the schema file's directory | Where to write the generated SQL file. A relative path is resolved from CWD.                                                                                                                |     |
 | `--strict` / `--no-strict` | `--strict`                                         | Overrides the schema's `validation.strictFields`. With `--strict`, any undeclared field in a data row is an **error** that blocks generation. With `--no-strict`, it is a **warning** only. |     |
-| `--root-data-path`         | Schema's `rootDataPath`                            | Overrides the `rootDataPath` in the schema. An absolute path is used directly; a relative path is resolved from CWD.                                                                        |     |
+| `--root-data-path`         | Schema's `rootDataPath` (else CWD)                 | Overrides the `rootDataPath` in the schema. An absolute path is used directly; a relative path is resolved from CWD. Must exist and be writable.                                            |     |
+| `--root-output-path`       | Schema's `rootOutputPath` (else CWD)               | Overrides the `rootOutputPath` in the schema. An absolute path is used directly; a relative path is resolved from CWD. Must exist and be writable. Each table's `outputFile` is resolved against this directory. |     |
 
 ### Summary Table
 
@@ -758,7 +790,9 @@ Status is `✓` if no errors for that table's rows, `✗` if any error was found
 
 ## 9. Generated SQL Output
 
-Each generated SQL file begins with a comment header:
+Knoppen writes one SQL file per table by default (resolved from `rootOutputPath` + `outputFile`, or `rootOutputPath/<tableName>.sql`). Tables that declare the same `outputFile` are merged into a single file, in topological order (see §6.5).
+
+Each generated SQL file begins with a comment header listing only the table(s) contained in that file. With default `outputFile` naming, `tag.sql` contains just `tag`:
 
 ```sql  
 -- ============================================================  
@@ -768,11 +802,20 @@ Each generated SQL file begins with a comment header:
 -- ------------------------------------------------------------  
 -- Tables:  
 --   tag:                 6 statement(s)  
---   users:               7 statement(s)  
---   post:                6 statement(s)  
+-- ============================================================  
+```  
+
+If, instead, `tag` and `post_tag` both declared `outputFile: lookups.sql`, `lookups.sql` would contain both:
+
+```sql  
+-- ============================================================  
+-- Generated by Knoppen version 0.5.0  
+-- User:      dutch  
+-- Generated: 2026-06-25 20:46:10  
+-- ------------------------------------------------------------  
+-- Tables:  
+--   tag:                 6 statement(s)  
 --   post_tag:            8 statement(s)  
---   audit_log:           9 statement(s)  
---   post_approval:       6 statement(s)  
 -- ============================================================  
 ```  
 
@@ -840,7 +883,7 @@ tables:
   # ── Lookup table ─────────────────────────────────
   - tableName: category
     description: "Article categories"
-    files:
+    dataFiles:
       - category.yaml
     primaryKey: [id]
 
@@ -873,7 +916,7 @@ tables:
   # ── Main content table ────────────────────────────
   - tableName: article
     description: "Blog articles"
-    files:
+    dataFiles:
       - article.yaml
     primaryKey: [id]
 
@@ -973,15 +1016,16 @@ Expected output: summary table with 3 category rows + 4 article rows, 0 errors.
 ### Step 6: Generate
 
 ```bash  
-knoppen generate schemas/blog.yaml --output /tmp/blog_seed.sql
+knoppen generate schemas/blog.yaml --root-output-path /tmp/blog_seed
 ```  
 
-The file `/tmp/blog_seed.sql` is created. Statements for `category` appear before `article` (topological order respects the FK).
+`/tmp/blog_seed/category.sql` and `/tmp/blog_seed/article.sql` are created (default `<tableName>.sql` naming — no `outputFile` was declared). `category.sql` is generated before `article.sql` (topological order respects the FK); if both tables declared the same `outputFile`, they would be merged into one file in that same order.
 
 ### Step 7: Run against your database
 
 ```bash  
-psql -h localhost -U myuser -d mydb -f /tmp/blog_seed.sql
+psql -h localhost -U myuser -d mydb -f /tmp/blog_seed/category.sql
+psql -h localhost -U myuser -d mydb -f /tmp/blog_seed/article.sql
 ```  
   
 ---  
@@ -1010,7 +1054,7 @@ psql -h localhost -U myuser -d mydb -f /tmp/blog_seed.sql
 
 - **Data-set-only validation.** FK checks run against the rows loaded in the current run. Rows already in the database are not consulted. A FK value that exists in the DB but not in the current data set will fail validation.
 - **Single-column FK validation only.** When a `foreignKey` block lists multiple columns (e.g. a composite FK), only the **first** column in the `columns` list is checked against parent data rows at runtime. The remaining columns are declared but not validated.
-- **Parent table with no declared files is a WARNING, not an error.** If a FK references a table that has no `files:` entries, the FK check is skipped with a warning, allowing partial schemas where some tables are populated externally.
+- **Parent table with no declared data files is a WARNING, not an error.** If a FK references a table that has no `dataFiles:` entries, the FK check is skipped with a warning, allowing partial schemas where some tables are populated externally.
 
 ### Generators
 
@@ -1036,4 +1080,5 @@ psql -h localhost -U myuser -d mydb -f /tmp/blog_seed.sql
 ### CLI
 
 - **Schema file path**: a bare filename (no directory separator) is resolved from CWD. A path containing `/` or `\` is used as-is. There is no support for classpath or URL-based schema references.
-- **`--root-data-path` relative paths** are resolved from CWD, not from the schema file's directory.
+- **`--root-data-path` / `--root-output-path` relative paths** are resolved from CWD, not from the schema file's directory. This differs from a `rootDataPath`/`rootOutputPath` declared *inside* the schema, which is resolved relative to the schema file's directory.
+- **`rootDataPath` / `rootOutputPath` are never created automatically.** Both must already exist and be writable, whether declared in the schema or passed via the CLI; Knoppen reports a validation error rather than creating the directory.

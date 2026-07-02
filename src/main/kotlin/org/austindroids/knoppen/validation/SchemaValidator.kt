@@ -8,6 +8,7 @@ import org.austindroids.knoppen.resourceText
 import org.austindroids.knoppen.validation.rules.RuleContext
 import org.austindroids.knoppen.validation.rules.SemanticValidator
 import org.austindroids.knoppen.validation.rules.StructuralValidator
+import org.slf4j.LoggerFactory
 import tools.jackson.databind.ObjectMapper
 
 
@@ -27,6 +28,7 @@ import tools.jackson.databind.ObjectMapper
  */
 object SchemaValidator {
 
+    private val log    = LoggerFactory.getLogger(SchemaValidator::class.java)
     private val loader = ClasspathResourceLoader(ResourceLoader::class.java)
 
     data class ValidationResult(
@@ -53,6 +55,7 @@ object SchemaValidator {
     }
 
     fun validate(yamlContent: String): ValidationResult {
+        log.debug("Validating schema ({} chars)", yamlContent.length)
         val metaSchemaJson = loader.resourceText(ResourceConstants.META_JSON_SCHEMA)
         // ── Step 1: Parse YAML + capture line numbers ─────────────────────────
         val loader = YamlLoader()
@@ -76,6 +79,10 @@ object SchemaValidator {
         if (!context.errors.any { it.severity == ValidationError.Severity.ERROR }) {
             SemanticValidator().validate(context)
         }
+
+        val errorCount   = context.errors.count { it.severity == ValidationError.Severity.ERROR }
+        val warningCount = context.errors.count { it.severity == ValidationError.Severity.WARNING }
+        log.debug("Schema validation complete: {} error(s), {} warning(s)", errorCount, warningCount)
 
         return ValidationResult(context.errors)
     }

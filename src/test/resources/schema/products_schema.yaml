@@ -1,0 +1,26 @@
+dialect: postgresql
+schema: store
+
+validation:
+  defaultNullable: true
+  strictFields: false
+
+tables:
+  - tableName: product
+    dataFiles:
+      - products_clean.csv
+    primaryKey: [id]
+    onConflict:
+      target: [id]
+      action: doNothing
+    columns:
+      - name: id
+        datatype: INTEGER
+        constraints:
+          - constraint: REQUIRED
+      - name: name
+        datatype: VARCHAR(200)
+        constraints:
+          - constraint: REQUIRED
+      - name: description
+        datatype: TEXT

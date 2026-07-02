@@ -1,6 +1,7 @@
 package org.austindroids.knoppen.datafile
 
 import org.austindroids.knoppen.schema.DatabaseSchema
+import org.slf4j.LoggerFactory
 import tools.jackson.databind.JsonNode
 
 /**
@@ -18,6 +19,10 @@ class ForeignKeyValidator(
     private val dbSchema: DatabaseSchema,
     private val allData: Map<String, List<JsonNode>>
 ) {
+    companion object {
+        private val log = LoggerFactory.getLogger(ForeignKeyValidator::class.java)
+    }
+
     fun validate(): List<DataValidationError> {
         val errors = mutableListOf<DataValidationError>()
 
@@ -49,10 +54,10 @@ class ForeignKeyValidator(
                     }
 
                     val parentColName = fk.columns.firstOrNull() ?: continue
-                    val valueStr = value.asText()
+                    val valueStr = value.asString()
 
                     val parentExists = parentRows.any { parentRow ->
-                        parentRow.get(parentColName)?.asText() == valueStr
+                        parentRow.get(parentColName)?.asString() == valueStr
                     }
 
                     if (!parentExists) {
@@ -69,6 +74,7 @@ class ForeignKeyValidator(
             }
         }
 
+        log.debug("Checked FK integrity across {} table(s): {} violation(s)", dbSchema.tables.size, errors.size)
         return errors
     }
 }

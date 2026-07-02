@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <plugin>
-    <name>Bootstrap SQL Generator</name>
-    <description>Generates SQL from YAML configuration files</description>
-    <groupId>com.yourcompany</groupId>
-    <artifactId>bootstrap-sqlgen-maven-plugin</artifactId>
-    <version>1.0.0-SNAPSHOT</version>
-    <goalPrefix>bootstrap-sqlgen</goalPrefix>
+    <name>Knoppen</name>
+    <description>Generates SQL from YAML/JSON/CSV data files against a declared schema</description>
+    <groupId>org.austindroids</groupId>
+    <artifactId>Knoppen</artifactId>
+    <version>@version@</version>
+    <goalPrefix>knoppen</goalPrefix>
 
     <mojos>
         <mojo>
@@ -14,7 +14,37 @@
             <requiresDirectInvocation>false</requiresDirectInvocation>
             <requiresProject>true</requiresProject>
             <phase>validate</phase>
-            <implementation>com.yourcompany.bootstrapsqlgen.mojos.ValidateMojo</implementation>
+            <implementation>org.austindroids.knoppen.mojos.ValidateMojo</implementation>
+            <language>kotlin</language>
+            <instantiationStrategy>per-lookup</instantiationStrategy>
+            <parameters>
+                <parameter>
+                    <name>configFile</name>
+                    <type>java.io.File</type>
+                    <required>false</required>
+                    <editable>true</editable>
+                    <description>The YAML configuration file to validate.</description>
+                </parameter>
+                <parameter>
+                    <name>schemaFile</name>
+                    <type>java.io.File</type>
+                    <required>false</required>
+                    <editable>true</editable>
+                    <description>The JSON schema file to validate the configuration against.</description>
+                </parameter>
+                <parameter>
+                    <name>failOnError</name>
+                    <type>boolean</type>
+                    <required>false</required>
+                    <editable>true</editable>
+                    <description>Whether to fail the build when validation errors are found.</description>
+                </parameter>
+            </parameters>
+            <configuration>
+                <configFile implementation="java.io.File" default-value="${project.basedir}/src/main/resources/bootstrap-config.yaml">${configFile}</configFile>
+                <schemaFile implementation="java.io.File" default-value="${project.basedir}/src/main/resources/schema/config-schema.json">${schemaFile}</schemaFile>
+                <failOnError implementation="boolean" default-value="true">${failOnError}</failOnError>
+            </configuration>
         </mojo>
 
         <mojo>
@@ -23,25 +53,53 @@
             <requiresDirectInvocation>false</requiresDirectInvocation>
             <requiresProject>true</requiresProject>
             <phase>generate-sources</phase>
-            <implementation>com.yourcompany.bootstrapsqlgen.mojos.GenerateMojo</implementation>
-        </mojo>
-
-        <mojo>
-            <goal>clean</goal>
-            <description>Clean generated SQL files</description>
-            <requiresDirectInvocation>false</requiresDirectInvocation>
-            <requiresProject>true</requiresProject>
-            <phase>clean</phase>
-            <implementation>com.yourcompany.bootstrapsqlgen.mojos.CleanMojo</implementation>
-        </mojo>
-
-        <mojo>
-            <goal>execute</goal>
-            <description>Execute generated SQL against database</description>
-            <requiresDirectInvocation>false</requiresDirectInvocation>
-            <requiresProject>true</requiresProject>
-            <phase>process-resources</phase>
-            <implementation>com.yourcompany.bootstrapsqlgen.mojos.ExecuteMojo</implementation>
+            <implementation>org.austindroids.knoppen.mojos.GenerateMojo</implementation>
+            <language>kotlin</language>
+            <instantiationStrategy>per-lookup</instantiationStrategy>
+            <parameters>
+                <parameter>
+                    <name>configFile</name>
+                    <type>java.io.File</type>
+                    <required>false</required>
+                    <editable>true</editable>
+                    <description>The YAML configuration file to generate SQL from.</description>
+                </parameter>
+                <parameter>
+                    <name>outputDirectory</name>
+                    <type>java.io.File</type>
+                    <required>false</required>
+                    <editable>true</editable>
+                    <description>The directory generated SQL files are written to.</description>
+                </parameter>
+                <parameter>
+                    <name>databaseType</name>
+                    <type>java.lang.String</type>
+                    <required>false</required>
+                    <editable>true</editable>
+                    <description>The target SQL dialect.</description>
+                </parameter>
+                <parameter>
+                    <name>generateInserts</name>
+                    <type>boolean</type>
+                    <required>false</required>
+                    <editable>true</editable>
+                    <description>Whether to generate INSERT statements.</description>
+                </parameter>
+                <parameter>
+                    <name>generateUpdates</name>
+                    <type>boolean</type>
+                    <required>false</required>
+                    <editable>true</editable>
+                    <description>Whether to generate UPDATE statements.</description>
+                </parameter>
+            </parameters>
+            <configuration>
+                <configFile implementation="java.io.File" default-value="${project.basedir}/src/main/resources/bootstrap-config.yaml">${configFile}</configFile>
+                <outputDirectory implementation="java.io.File" default-value="${project.build.directory}/generated-sql">${outputDirectory}</outputDirectory>
+                <databaseType implementation="java.lang.String" default-value="postgresql">${databaseType}</databaseType>
+                <generateInserts implementation="boolean" default-value="true">${generateInserts}</generateInserts>
+                <generateUpdates implementation="boolean" default-value="true">${generateUpdates}</generateUpdates>
+            </configuration>
         </mojo>
     </mojos>
 </plugin>

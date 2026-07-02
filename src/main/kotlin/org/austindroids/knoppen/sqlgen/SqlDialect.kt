@@ -12,7 +12,7 @@ import org.austindroids.knoppen.schema.TableSchema
  */
 data class DataRow(
     val tableName: String,
-    val fields: Map<String, Any?>,      // preserves insertion order
+    val fields: Map<String, Any?>,     // preserves insertion order
     val schema: TableSchema
 )
 

@@ -5,16 +5,16 @@ import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
-import java.util.UUID
+import kotlin.uuid.Uuid
 
 // ── SEQUENCE ──────────────────────────────────────────────────────────────────
 
 /**
  * Produces a numeric sequence with an optional string suffix.
  *
- * SEQUENCE(10, 10)        → 10, 20, 30, 40
+ * SEQUENCE(10, 10)  → 10, 20, 30, 40
  * SEQUENCE(100, 100, _id) → 100_id, 200_id, 300_id
- * COUNTER(1)              → 1, 2, 3, 4  (step is fixed at 1 by the parser)
+ * COUNTER(1)  → 1, 2, 3, 4  (step is fixed at 1 by the parser)
  */
 class SequenceGenerator(
     private val start: Long,
@@ -82,7 +82,7 @@ class TemplateGenerator(private val pattern: String) : ColumnGenerator {
         return when (name.lowercase()) {
             "index"    -> applyIntFormat(rowIndex, fmt)
             "rownum"   -> applyIntFormat(rowIndex + 1, fmt)
-            "uuid"     -> UUID.randomUUID().toString()
+            "uuid"     -> Uuid.random().toString()
             "date"     -> now.format(DateTimeFormatter.ISO_LOCAL_DATE)
             "datetime" -> now.format(DateTimeFormatter.ISO_INSTANT)
             "yyyymmdd" -> now.format(DateTimeFormatter.ofPattern("yyyyMMdd"))
@@ -153,7 +153,7 @@ class TimestampOffsetGenerator(
  * UUID() → "550e8400-e29b-41d4-a716-446655440000"
  */
 class UuidGenerator : ColumnGenerator {
-    override fun next(rowIndex: Int): Any? = UUID.randomUUID().toString()
+    override fun next(rowIndex: Int): Any? = Uuid.random().toString()
     override fun reset() { /* stateless */ }
 }
 
@@ -197,7 +197,7 @@ class DistributeGenerator(
     private var sequence: List<String> = emptyList()
     private var lastBuiltFor: Int = -1
 
-    override fun next(rowIndex: Int): Any? {
+    override fun next(rowIndex: Int): Any {
         // We don't know total row count upfront, so we expand the sequence
         // in blocks of 100 (the LCM of all sensible weight denominators)
         if (rowIndex >= sequence.size) rebuildSequence(rowIndex + 1)

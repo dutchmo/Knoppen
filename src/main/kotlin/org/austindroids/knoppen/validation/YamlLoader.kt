@@ -70,7 +70,7 @@ class YamlLoader {
                 when (token) {
                     JsonToken.START_OBJECT -> {
                         if (pendingFieldName != null) {
-                            pathStack.addLast(pendingFieldName!!)
+                            pathStack.addLast(pendingFieldName)
                             pendingFieldName = null
                         } else if (containerStack.lastOrNull() == ContainerType.ARRAY) {
                             pathStack.addLast(indexStack.last().toString())
@@ -82,7 +82,7 @@ class YamlLoader {
 
                     JsonToken.START_ARRAY -> {
                         if (pendingFieldName != null) {
-                            pathStack.addLast(pendingFieldName!!)
+                            pathStack.addLast(pendingFieldName)
                             pendingFieldName = null
                         }
                         lineMap[currentPath()] = line

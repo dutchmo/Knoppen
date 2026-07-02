@@ -22,7 +22,12 @@
 
     "rootDataPath": {
       "type": "string",
-      "description": "Base directory for resolving data file paths; relative to the schema file's directory"
+      "description": "Base directory for resolving data file paths; relative to the schema file's directory. Defaults to the current working directory if omitted and not overridden by the CLI."
+    },
+
+    "rootOutputPath": {
+      "type": "string",
+      "description": "Base directory for resolving generated SQL output file paths; relative to the schema file's directory. Defaults to the current working directory if omitted and not overridden by the CLI."
     },
 
     "validation": {
@@ -65,11 +70,15 @@
         "description": {
           "type": "string"
         },
-        "files": {
+        "dataFiles": {
           "type": "array",
           "items": { "type": "string" },
           "default": [],
-          "description": "List of data file paths for this table, resolved relative to rootDataPath"
+          "description": "List of data file paths for this table, resolved relative to rootDataPath. An empty list skips processing for this table."
+        },
+        "outputFile": {
+          "type": "string",
+          "description": "Output SQL file name for this table, resolved relative to rootOutputPath. Defaults to '<tableName>.sql' if omitted. Multiple tables may share the same outputFile, in which case their generated statements are written to the same file."
         },
         "primaryKey": {
           "type": "array",

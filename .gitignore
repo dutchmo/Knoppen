@@ -1,6 +1,7 @@
 .gradle/
 build/
 !gradle/wrapper/gradle-wrapper.jar
+knoppen.log
 
 
 ### IntelliJ IDEA ###
@@ -14,6 +15,7 @@ build/
 
 ### VS Code ###
 .vscode/
+bin/
 
 ### claude
 .claude/

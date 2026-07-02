@@ -2,73 +2,73 @@
 
 
 
-# ─────────────────────────────────────────────
+# ---------------------------------------------
 # audit_log
 # Exercises:
 #   - ON CONFLICT DO NOTHING (append-only)
-#   - TIMESTAMP_OFFSET generator (event_ts — stepping back 6h per row)
+#   - TIMESTAMP_OFFSET generator (event_ts -- stepping back 6h per row)
 #   - FOREIGN_CYCLE generator: user_id cycles through users.id [1..5]
 #   - FOREIGN_CYCLE generator: post_id cycles through post.id [100..104]
 #   - Nullable FK columns (user_id, post_id may be null for system events)
 #   - Duplicate PK to prove DO NOTHING fires
-# ──────────────────────────────────────────────
+# ----------------------------------------------
 - id: 1000
   event: "USER_CREATED"
   user_id: 1
-  # post_id omitted — nullable
-  notes: "Bootstrap insert — alice"
+  # post_id omitted -- nullable
+  notes: "Bootstrap insert -- alice"
   # event_ts generated: now - 0h  (rowIndex 0)
 
 - id: 1001
   event: "USER_CREATED"
   user_id: 2
-  notes: "Bootstrap insert — bob"
+  notes: "Bootstrap insert -- bob"
   # event_ts generated: now - 6h  (rowIndex 1)
 
 - id: 1002
   event: "POST_CREATED"
   post_id: 100
-  # user_id generated: FOREIGN_CYCLE(users, id) → 1
+  # user_id generated: FOREIGN_CYCLE(users, id) -> 1
   notes: "Post 100 created"
   # event_ts generated: now - 12h (rowIndex 2)
 
 - id: 1003
   event: "POST_CREATED"
   post_id: 101
-  # user_id generated: FOREIGN_CYCLE(users, id) → 2
+  # user_id generated: FOREIGN_CYCLE(users, id) -> 2
   notes: "Post 101 created"
   # event_ts generated: now - 18h (rowIndex 3)
 
 - id: 1004
   event: "POST_UPDATED"
   post_id: 101
-  # user_id generated: FOREIGN_CYCLE(users, id) → 3
+  # user_id generated: FOREIGN_CYCLE(users, id) -> 3
   notes: "Post 101 revised title and approval score"
   # event_ts generated: now - 24h (rowIndex 4)
 
 - id: 1005
   event: "POST_APPROVED"
   post_id: 102
-  # user_id generated: FOREIGN_CYCLE(users, id) → 4
+  # user_id generated: FOREIGN_CYCLE(users, id) -> 4
   # event_ts generated: now - 30h (rowIndex 5)
 
 - id: 1006
   event: "POST_REJECTED"
   post_id: 103
-  # user_id generated: FOREIGN_CYCLE(users, id) → 5
+  # user_id generated: FOREIGN_CYCLE(users, id) -> 5
   # event_ts generated: now - 36h (rowIndex 6)
 
 - id: 1007
   event: "POST_APPROVED"
   post_id: 104
-  # user_id generated: FOREIGN_CYCLE(users, id) → 1 (wraps)
+  # user_id generated: FOREIGN_CYCLE(users, id) -> 1 (wraps)
   # event_ts generated: now - 42h (rowIndex 7)
 
-# ── ON CONFLICT DO NOTHING exercise ───────────────────
+# -- ON CONFLICT DO NOTHING exercise -------------------
 # id: 1002 already exists.
-# This row must be silently skipped — log is immutable.
+# This row must be silently skipped -- log is immutable.
 - id: 1002
   event: "POST_UPDATED"
   post_id: 100
   notes: "THIS_SHOULD_NOT_APPEAR"
-  # event_ts generated: now - 48h (discarded — DO NOTHING)
+  # event_ts generated: now - 48h (discarded -- DO NOTHING)

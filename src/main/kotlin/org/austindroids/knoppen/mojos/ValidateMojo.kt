@@ -4,10 +4,14 @@ import org.apache.maven.plugin.AbstractMojo
 import org.apache.maven.plugin.MojoExecutionException
 import org.apache.maven.plugins.annotations.Mojo
 import org.apache.maven.plugins.annotations.Parameter
+import org.slf4j.LoggerFactory
 import java.io.File
 
 @Mojo(name = "validate")
 class ValidateMojo : AbstractMojo() {
+
+    // See GenerateMojo for why this is separate from AbstractMojo's inherited getLog()/log.
+    private val logger = LoggerFactory.getLogger(ValidateMojo::class.java)
 
     @Parameter(property = "configFile", defaultValue = "\${project.basedir}/src/main/resources/bootstrap-config.yaml")
     private lateinit var configFile: File
@@ -20,6 +24,7 @@ class ValidateMojo : AbstractMojo() {
 
     override fun execute() {
         log.info("Validating YAML configuration: ${configFile.absolutePath}")
+        logger.debug("ValidateMojo invoked: configFile={}, schemaFile={}", configFile, schemaFile)
 
         try {
             // TODO: Implement YAML validation against JSON schema

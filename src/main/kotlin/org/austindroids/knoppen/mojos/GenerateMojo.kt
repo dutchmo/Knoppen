@@ -4,10 +4,16 @@ import org.apache.maven.plugin.AbstractMojo
 import org.apache.maven.plugin.MojoExecutionException
 import org.apache.maven.plugins.annotations.Mojo
 import org.apache.maven.plugins.annotations.Parameter
+import org.slf4j.LoggerFactory
 import java.io.File
 
 @Mojo(name = "generate")
 class GenerateMojo : AbstractMojo() {
+
+    // Shared pipeline classes (UpsertGenerator, SchemaValidator, ...) log via slf4j so the same
+    // log statements apply whether invoked from the CLI (logback) or this Maven plugin (Maven's
+    // own slf4j binding). Named `logger`, not `log`, to avoid shadowing AbstractMojo's getLog().
+    private val logger = LoggerFactory.getLogger(GenerateMojo::class.java)
 
     @Parameter(property = "configFile", defaultValue = "\${project.basedir}/src/main/resources/bootstrap-config.yaml")
     private lateinit var configFile: File
@@ -26,6 +32,7 @@ class GenerateMojo : AbstractMojo() {
 
     override fun execute() {
         log.info("Generating SQL from YAML configuration")
+        logger.debug("GenerateMojo invoked: configFile={}, outputDirectory={}", configFile, outputDirectory)
 
         try {
             if (!configFile.exists()) {

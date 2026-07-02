@@ -1,6 +1,6 @@
 # ============================================================
 # Data file: tag
-# Standalone — no foreign key dependencies.
+# Standalone -- no foreign key dependencies.
 # Exercises:
 #   - ON CONFLICT DO NOTHING
 #   - SEQUENCE generator (column_order)
@@ -29,9 +29,9 @@
   name: "sports"
   # column_order generated: 50
 
-# ── ON CONFLICT DO NOTHING exercise ──────────────────
+# -- ON CONFLICT DO NOTHING exercise ------------------
 # id: 3 already exists as "health".
-# With DO NOTHING this row is silently skipped —
+# With DO NOTHING this row is silently skipped --
 # the name must remain "health" in the database.
 - id: 3
   name: "THIS_SHOULD_NOT_APPEAR"

@@ -36,7 +36,6 @@ object GeneratorParser {
             .substringAfter("(", "")
             .substringBeforeLast(")", "")
             .trim()
-
         // Split on commas, but only at top level (no nested parens in current generators)
         val args = if (argStr.isEmpty()) emptyList()
         else argStr.split(",").map { it.trim() }

@@ -1,5 +1,6 @@
 package org.austindroids.knoppen.schema
 
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonClassDiscriminator
@@ -13,6 +14,7 @@ data class DatabaseSchema(
     val dialect: String,                            // e.g. "postgresql"
     val schema: String,                             // e.g. "code_sample"
     val rootDataPath: String? = null,               // optional base dir for data file resolution
+    val rootOutputPath: String? = null,             // optional base dir for SQL output file resolution
     val validation: ValidationConfig,
     val tables: List<TableSchema>
 )
@@ -32,7 +34,8 @@ data class TableSchema(
     val schemaName: String = "",                    // populated by SchemaParser from DatabaseSchema.schema
     val tableName: String,                          // Matches YAML key "tableName"
     val description: String? = null,
-    val files: List<String> = emptyList(),          // data file paths relative to rootDataPath
+    val dataFiles: List<String> = emptyList(),       // data file paths relative to rootDataPath; empty = skip table
+    val outputFile: String? = null,                 // SQL output file name relative to rootOutputPath; defaults to "<tableName>.sql"
     val primaryKey: List<String>,                   // List of column names forming the PK
     val onConflict: OnConflictConfig? = null,
     val columns: List<ColumnSchema>
@@ -114,6 +117,7 @@ enum class ForeignKeyAction {
 // only the fields relevant to it, enforced at deserialization.
 // The "type" discriminator field drives which subclass is used.
 
+@OptIn(ExperimentalSerializationApi::class)
 @JsonClassDiscriminator("constraint")
 @Serializable
 sealed class ColumnConstraint {

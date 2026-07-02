@@ -22,15 +22,15 @@ class SemanticValidator {
         if (!tables.isArray) return  // Structural validator will catch this
 
         // Build a set of known table names for FK cross-reference checks
-        val knownTables = tables.mapNotNull { it.path("tableName").asText(null) }.toSet()
+        val knownTables = tables.mapNotNull { it.path("tableName").asString(null) }.toSet()
 
         tables.forEachIndexed { tableIdx, table ->
             val tablePath = "/tables/$tableIdx"
-            val tableName = table.path("tableName").asText("(unknown)")
+            val tableName = table.path("tableName").asString("(unknown)")
 
             // Collect column names for reference checks
             val columnNames = table.path("columns")
-                .mapNotNull { it.path("name").asText(null) }
+                .mapNotNull { it.path("name").asString(null) }
                 .toSet()
 
             validatePrimaryKey(context, table, tablePath, tableName, columnNames)
@@ -38,7 +38,7 @@ class SemanticValidator {
 
             table.path("columns").forEachIndexed { colIdx, column ->
                 val colPath = "$tablePath/columns/$colIdx"
-                val colName = column.path("name").asText("(unknown)")
+                val colName = column.path("name").asString("(unknown)")
 
                 validateForeignKey(context, column, colPath, colName, knownTables)
                 validateConstraints(context, column, colPath, colName)
@@ -57,7 +57,7 @@ class SemanticValidator {
         columnNames: Set<String>
     ) {
         table.path("primaryKey").forEachIndexed { idx, pkCol ->
-            val colName = pkCol.asText()
+            val colName = pkCol.asString()
             if (colName !in columnNames) {
                 context.error(
                     "$tablePath/primaryKey/$idx",
@@ -84,7 +84,7 @@ class SemanticValidator {
 
         // target columns must exist
         onConflict.path("target").forEachIndexed { idx, col ->
-            val colName = col.asText()
+            val colName = col.asString()
             if (colName !in columnNames) {
                 context.error(
                     "$conflictPath/target/$idx",
@@ -96,7 +96,7 @@ class SemanticValidator {
 
         // excludeFromUpdate columns must exist
         onConflict.path("excludeFromUpdate").forEachIndexed { idx, col ->
-            val colName = col.asText()
+            val colName = col.asString()
             if (colName !in columnNames) {
                 context.error(
                     "$conflictPath/excludeFromUpdate/$idx",
@@ -108,7 +108,7 @@ class SemanticValidator {
 
         // Warn if action is "update" but excludeFromUpdate is empty —
         // almost certainly the PK and create timestamps should be excluded
-        val action = onConflict.path("action").asText()
+        val action = onConflict.path("action").asString()
         val excludeCount = onConflict.path("excludeFromUpdate").size()
         if (action == "update" && excludeCount == 0) {
             context.warning(
@@ -131,7 +131,7 @@ class SemanticValidator {
         val fk = column.path("foreignKey")
         if (fk.isMissingNode) return
 
-        val fkTable = fk.path("table").asText(null) ?: return  // structural validator catches missing
+        val fkTable = fk.path("table").asString(null) ?: return  // structural validator catches missing
 
         if (fkTable !in knownTables) {
             // This is a warning, not an error — the target table may live in
@@ -155,7 +155,7 @@ class SemanticValidator {
     ) {
         column.path("constraints").forEachIndexed { idx, constraint ->
             val constraintPath = "$colPath/constraints/$idx"
-            when (val type = constraint.path("constraint").asText()) {
+            when (val type = constraint.path("constraint").asString()) {
 
                 "PATTERN"  -> validatePatternConstraint(context, constraint, constraintPath, colName)
                 "ENUM"     -> validateEnumConstraint(context, constraint, constraintPath, colName)
@@ -180,13 +180,13 @@ class SemanticValidator {
 
         // Cross-constraint: conflictTarget on non-unique constraint
         column.path("constraints").forEachIndexed { idx, constraint ->
-            val isUnique = constraint.path("constraint").asText() == "UNIQUE"
+            val isUnique = constraint.path("constraint").asString() == "UNIQUE"
             val hasConflictTarget = constraint.path("conflictTarget").asBoolean(false)
             if (hasConflictTarget && !isUnique) {
                 context.error(
                     "$colPath/constraints/$idx/conflictTarget",
                     "Column '$colName': conflictTarget: true is only valid on a 'UNIQUE' constraint," +
-                            " found on '${constraint.path("constraint").asText()}'"
+                            " found on '${constraint.path("constraint").asString()}'"
                 )
             }
         }
@@ -198,7 +198,7 @@ class SemanticValidator {
         path: String,
         colName: String
     ) {
-        val regex = constraint.path("regex").asText(null) ?: return
+        val regex = constraint.path("regex").asString(null) ?: return
         try {
             Regex(regex)
         } catch (e: Exception) {
@@ -220,7 +220,7 @@ class SemanticValidator {
 
         val seen = mutableSetOf<String>()
         values.forEachIndexed { idx, v ->
-            val text = v.asText()
+            val text = v.asString()
             if (!seen.add(text)) {
                 context.error(
                     "$path/values/$idx",
@@ -236,7 +236,7 @@ class SemanticValidator {
         path: String,
         colName: String
     ) {
-        val notPast = constraint.path("notPast").asText(null) ?: return
+        val notPast = constraint.path("notPast").asString(null) ?: return
 
         // Must match ISO 8601 negative duration e.g. -P4Y, -P1Y6M, -P30D
         val iso8601NegativeDuration = Regex("^-P(?:\\d+Y)?(?:\\d+M)?(?:\\d+D)?(?:T(?:\\d+H)?(?:\\d+M)?(?:\\d+S)?)?$")
@@ -269,8 +269,8 @@ class SemanticValidator {
         val default = column.path("default")
         if (default.isMissingNode) return
 
-        val type = default.path("kind").asText(null) ?: return  // structural catches missing
-        val value = default.path("value").asText(null)
+        val type = default.path("kind").asString(null) ?: return  // structural catches missing
+        val value = default.path("value").asString(null)
 
         if (value.isNullOrBlank()) {
             context.error(

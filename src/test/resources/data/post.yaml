@@ -1,11 +1,11 @@
-# ──────────────────────────────────────────────
+# ----------------------------------------------
 # post
 # Exercises:
-#   - FK → users (user_id must exist in users rows above)
+#   - FK -> users (user_id must exist in users rows above)
 #   - ON CONFLICT UPDATE with excludeFromUpdate (user_id preserved)
 #   - SEQUENCE generator (column_order)
 #   - pattern constraint (title)
-# ──────────────────────────────────────────────
+# ----------------------------------------------
 - id: 100
   user_id: 1
   title: "Introduction to PostgreSQL"
@@ -36,7 +36,7 @@
   percent_approved: 88.75
   # column_order generated: 50
 
-# ── ON CONFLICT UPDATE exercise ───────────────────────
+# -- ON CONFLICT UPDATE exercise -----------------------
 # id: 101 already exists.
 # percent_approved will be updated.
 # user_id must NOT change (excludeFromUpdate).
@@ -45,4 +45,4 @@
   user_id: 2             # user_id: 9999 was changed to valid user_id 2 for FK validation
   title: "Advanced Indexing Strategies - Revised"
   percent_approved: 92.00
-  # column_order generated: 60 (new value for this upsert — will update)
+  # column_order generated: 60 (new value for this upsert -- will update)

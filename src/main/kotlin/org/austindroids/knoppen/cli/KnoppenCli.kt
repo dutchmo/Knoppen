@@ -19,7 +19,6 @@ import java.nio.file.Path
 import kotlin.io.path.Path
 import kotlin.io.path.absolute
 import kotlin.io.path.exists
-import kotlin.io.path.nameWithoutExtension
 import kotlin.io.path.readText
 import kotlin.io.path.writeText
 
@@ -38,28 +37,26 @@ abstract class BaseKnoppenCommand(name: String) : CliktCommand(name = name) {
     val schema by argument("SCHEMA")
         .help("Path to the schema YAML file (filename resolved from CWD if no directory given)")
 
-    val output by option("--output", "-o")
-        .help("Output file for generated SQL (default: <schema>.sql in same directory)")
-
     val strict by option("--strict").flag("--no-strict", default = true)
 
     val rootDataPath by option("--root-data-path")
         .help("Override rootDataPath declared in the schema YAML")
 
+    val rootOutputPath by option("--root-output-path")
+        .help("Override rootOutputPath declared in the schema YAML")
+
+    val debug by option("--debug", "-v").flag(default = false)
+        .help("Raise console logging to DEBUG (the log file is always DEBUG)")
+
+    /** Must run before any pipeline code (and thus any first slf4j logger use). */
+    protected fun configureLogging() {
+        if (debug) System.setProperty("KNOPPEN_CONSOLE_LEVEL", "DEBUG")
+    }
+
     fun resolveSchemaPath(): Path {
         val p = Path(schema)
         return if (p.isAbsolute || schema.contains('/') || schema.contains('\\')) p
         else Path(System.getProperty("user.dir")).resolve(schema)
-    }
-
-    fun resolveOutputPath(schemaPath: Path): Path {
-        return when {
-            output != null -> {
-                val p = Path(output!!)
-                if (p.isAbsolute) p else Path(System.getProperty("user.dir")).resolve(output!!)
-            }
-            else -> schemaPath.parent.resolve("${schemaPath.nameWithoutExtension}.sql")
-        }
     }
 
     fun loadAndValidateSchema(schemaPath: Path): DatabaseSchema? {
@@ -86,8 +83,12 @@ abstract class BaseKnoppenCommand(name: String) : CliktCommand(name = name) {
         }
     }
 
-    fun resolveRootDataPathOverride(): Path? =
-        rootDataPath?.let {
+    fun resolveRootDataPathOverride(): Path? = resolveOverridePath(rootDataPath)
+
+    fun resolveRootOutputPathOverride(): Path? = resolveOverridePath(rootOutputPath)
+
+    private fun resolveOverridePath(raw: String?): Path? =
+        raw?.let {
             val p = Path(it)
             if (p.isAbsolute) p else Path(System.getProperty("user.dir")).resolve(p)
         }
@@ -101,13 +102,15 @@ class ValidateCommand : BaseKnoppenCommand("validate") {
     override fun help(context: Context) = "Validate schema and data files without generating SQL"
 
     override fun run() {
-        val startMs          = System.currentTimeMillis()
-        val schemaPath       = resolveSchemaPath()
-        val dbSchema         = loadAndValidateSchema(schemaPath) ?: throw ProgramResult(1)
-        val dataPathOverride = resolveRootDataPathOverride()
+        configureLogging()
+        val startMs            = System.currentTimeMillis()
+        val schemaPath         = resolveSchemaPath()
+        val dbSchema           = loadAndValidateSchema(schemaPath) ?: throw ProgramResult(1)
+        val dataPathOverride   = resolveRootDataPathOverride()
+        val outputPathOverride = resolveRootOutputPathOverride()
 
         val generator = UpsertGenerator(dbSchema, PostgresDialect())
-        val result    = generator.generateAll(schemaPath, dataPathOverride, generateSql = false)
+        val result    = generator.generateAll(schemaPath, dataPathOverride, outputPathOverride, generateSql = false)
         val elapsedMs = System.currentTimeMillis() - startMs
 
         SummaryPrinter.print(schemaPath.fileName.toString(), result, elapsedMs, "validate")
@@ -124,21 +127,28 @@ class GenerateCommand : BaseKnoppenCommand("generate") {
     override fun help(context: Context) = "Validate and generate SQL upsert statements"
 
     override fun run() {
-        val startMs          = System.currentTimeMillis()
-        val schemaPath       = resolveSchemaPath()
-        val dbSchema         = loadAndValidateSchema(schemaPath) ?: throw ProgramResult(1)
-        val dataPathOverride = resolveRootDataPathOverride()
-        val outputPath       = resolveOutputPath(schemaPath)
+        configureLogging()
+        val startMs            = System.currentTimeMillis()
+        val schemaPath         = resolveSchemaPath()
+        val dbSchema           = loadAndValidateSchema(schemaPath) ?: throw ProgramResult(1)
+        val dataPathOverride   = resolveRootDataPathOverride()
+        val outputPathOverride = resolveRootOutputPathOverride()
 
         val generator = UpsertGenerator(dbSchema, PostgresDialect())
-        val result    = generator.generateAll(schemaPath, dataPathOverride)
+        val result    = generator.generateAll(schemaPath, dataPathOverride, outputPathOverride)
         val elapsedMs = System.currentTimeMillis() - startMs
 
         SummaryPrinter.print(schemaPath.fileName.toString(), result, elapsedMs, "generate")
 
         if (result.hasErrors) throw ProgramResult(1)
 
-        outputPath.writeText(result.toSqlString())
-        echo("SQL written to: $outputPath")
+        if (result.outputFiles.isEmpty()) {
+            echo("No SQL statements generated — nothing to write.")
+        } else {
+            result.outputFiles.forEach { file ->
+                file.path.writeText(file.sql)
+                echo("SQL written to: ${file.path} (${file.tables.joinToString(", ")})")
+            }
+        }
     }
 }

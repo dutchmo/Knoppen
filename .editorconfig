@@ -1,0 +1,20 @@
+root = true
+
+[*{kt,kts}]
+# === Disable noisy formatting rules ===
+ktlint_standard_final-newline = disabled
+ktlint_standard_no-consecutive-blank-lines = disabled
+ktlint_standard_no-blank-line-before-rbrace = disabled
+ktlint_standard_no-blank-line-in-list = disabled
+ktlint_standard_no-empty-first-line-in-class-body = disabled
+ktlint_standard_no-empty-first-line-in-method-block = disabled
+ktlint_standard_blank-line-before-declaration = disabled
+ktlint_standard_no-trailing-spaces = disabled
+ktlint_standard_no-multi-spaces = disabled
+ktlint_standard_try-catch-finally-spacing = disabled
+ktlint_standard_spacing-between-declarations-with-annotations = disabled
+ktlint_standard_no-consecutive-comments = disabled
+
+# === Keep these — they catch real bugs ===
+# ktlint_standard_no-unused-imports = disabled   # uncomment if you want this too
+# ktlint_standard_no-wildcard-imports = disabled  # uncomment if you use wildcard imports

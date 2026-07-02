@@ -40,7 +40,7 @@ Operations in the plugin are tied to appropriate Maven lifecycle events.
 
 ### Generation
 ```bash
-  knoppen generate schemas/blog.yaml --no-strict --root-data-path /tmp/data --output /tmp/blog_seed.sql
+  knoppen generate schemas/blog.yaml --no-strict --root-data-path /tmp/data --root-output-path /tmp
 ```
 
 ### Maven Configuration
@@ -51,7 +51,7 @@ Add to your `pom.xml`:
 <build>
   <plugins>
     <plugin>
-      <groupId>com.yourcompany</groupId>
+      <groupId>com.austindroids</groupId>
       <artifactId>knoppen-maven-plugin</artifactId>
       <version>1.0.0</version>
       <configuration>
@@ -70,4 +70,6 @@ Add to your `pom.xml`:
   </plugins>
 </build>
 ```
+
+## [Tutorial](doc/Tutorial.md)
 

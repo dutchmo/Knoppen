@@ -1,7 +1,6 @@
 package org.austindroids.knoppen
 
 import java.io.InputStream
-import java.io.InputStreamReader
 import java.nio.charset.Charset
 
 
@@ -11,7 +10,6 @@ object ResourceConstants {
 
     // Application configs
     const val APP_PROPERTIES = "application.properties"
-    const val LOG4J2_XML = "log4j2.xml"
 
     private val buildProps: java.util.Properties by lazy {
         java.util.Properties().also { props ->
@@ -34,17 +32,22 @@ interface ResourceLoader {
 }
 
 // Extension functions for convenience – they all build on the stream contract
-fun ResourceLoader.resourceText(path: String, charset: Charset = Charsets.UTF_8): String =
-    resourceStream(path).use { it.bufferedReader(charset).readText() }
+fun ResourceLoader.resourceText(
+    path: String,
+    charset: Charset = Charsets.UTF_8,
+): String = resourceStream(path).use { it.bufferedReader(charset).readText() }
 
-fun ResourceLoader.resourceLines(path: String, charset: Charset = Charsets.UTF_8): List<String> =
-    resourceStream(path).use { it.bufferedReader(charset).readLines() }
+fun ResourceLoader.resourceLines(
+    path: String,
+    charset: Charset = Charsets.UTF_8,
+): List<String> = resourceStream(path).use { it.bufferedReader(charset).readLines() }
 
-fun ResourceLoader.resourceBytes(path: String): ByteArray =
-    resourceStream(path).use { it.readBytes() }
+fun ResourceLoader.resourceBytes(path: String): ByteArray = resourceStream(path).use { it.readBytes() }
 
 // --- Default implementation using classpath ---
-class ClasspathResourceLoader(private val classLoader: ClassLoader) : ResourceLoader {
+class ClasspathResourceLoader(
+    private val classLoader: ClassLoader,
+) : ResourceLoader {
 
     constructor(sourceClass: Class<*>) : this(sourceClass.classLoader)
 
@@ -58,7 +61,9 @@ class ClasspathResourceLoader(private val classLoader: ClassLoader) : ResourceLo
 
 }
 
-class ResourceNotFoundException(path: String, classLoader: ClassLoader)
-    : RuntimeException("Resource not found: $path (classLoader=$classLoader)")
+class ResourceNotFoundException(
+    path: String,
+    classLoader: ClassLoader,
+) : RuntimeException("Resource not found: $path (classLoader=$classLoader)")
 
 

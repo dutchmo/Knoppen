@@ -2,7 +2,7 @@
 
 
 
-# ──────────────────────────────────────────────
+# ----------------------------------------------
 # users
 # Exercises:
 #   - ON CONFLICT UPDATE with excludeFromUpdate
@@ -10,9 +10,9 @@
 #   - FUNCTION default (createTs)
 #   - EXPRESSION default (metadata)
 #   - enum constraint (type)
-#   - temporal constraint (approvedTs) — one intentionally bad row flagged below
+#   - temporal constraint (approvedTs) -- one intentionally bad row flagged below
 #   - ON CONFLICT on username unique key
-# ──────────────────────────────────────────────
+# ----------------------------------------------
 - id: 3
   username: "carol"
   type: "USER"
@@ -21,7 +21,7 @@
 - id: 4
   username: "dave"
   type: "USER"
-  # approvedTs omitted — nullable, no constraint triggered
+  # approvedTs omitted -- nullable, no constraint triggered
 
 - id: 5
   username: "eve"
