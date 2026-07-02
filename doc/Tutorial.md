@@ -463,6 +463,41 @@ Examples:
 | `SEQUENCE(100,100,_id)` | `100_id` | `200_id` | `300_id` | `400_id` |  
 | `SEQUENCE(5,-1)` | 5 | 4 | 3 | 2 |  
 
+### GROUPED_SEQUENCE
+
+Like `SEQUENCE`, but the counter **resets to `start`** whenever the value of `groupByColumn` changes from the previous row.
+
+```yaml  
+default:  
+  kind: GENERATOR  
+  value: "GROUPED_SEQUENCE(groupByColumn, start, step)"  
+```  
+
+| Argument | DataType | Description |  
+|----------|----------|-------------|  
+| `groupByColumn` | string   | Name of a column declared on the same table. Its value in the current row is compared against the previous row's value. |  
+| `start` | integer  | Value used the first time a group is seen (including the very first row). |  
+| `step` | integer  | Increment per row within a group (must not be zero; negative values count down). |  
+
+Example — an `employee` table with `department_name` and a generated `department_order`:
+
+```yaml  
+- department_name: IT
+  # department_order generated: 0
+- department_name: IT
+  # department_order generated: 10
+- department_name: IT
+  # department_order generated: 20
+- department_name: MARKETING
+  # department_order generated: 0   ← group changed, counter resets
+- department_name: MARKETING
+  # department_order generated: 10
+```  
+
+> **Reset is change-detection, not per-group state**: `GROUPED_SEQUENCE` only compares each row to the *immediately preceding* row. If a group's rows are not contiguous in the data file (e.g. `IT, MARKETING, IT`), the counter resets every time the value changes — it does not "remember" where it left off the last time that group appeared. Sort or group your data file by `groupByColumn` to get a clean, non-overlapping sequence per group.
+>
+> **Schema validation**: `groupByColumn` must be a column declared on the same table, or schema validation fails with an error.
+
 ### COUNTER
 
 Shorthand for `SEQUENCE(start, 1)` — increments by 1 each row.
@@ -583,6 +618,8 @@ This reads all `id` values that were produced for the `users` table and cycles t
 | 1, 2, 3, 4, 5 | 1, 2, 3, 4, 5, 1, 2, 3, ... |  
 
 > **Note**: `FOREIGN_CYCLE` reads the values Knoppen generated or computed during the current run, not values from the database. If a column uses a hardcoded value in the data file (not a generator), those values are also recorded and available to `FOREIGN_CYCLE`.
+>
+> **Schema validation**: both `tableName` and `columnName` must be declared in the schema file — `tableName` must match a `tableName` among the tables, and `columnName` must be one of that table's declared columns. Either being missing fails schema validation with an error (unlike a `foreignKey:` block's `table`, which is only a warning if not found — `FOREIGN_CYCLE` always needs same-run data, so a missing reference can never be intentional).
   
 ---  
 
@@ -1062,6 +1099,7 @@ psql -h localhost -U myuser -d mydb -f /tmp/blog_seed/article.sql
 - **`FOREIGN_CYCLE` requires same-run data.** It reads values generated in the current Knoppen run. If you reference a parent table that has no data in the current run (no files), `FOREIGN_CYCLE` will throw an error at generation time.
 - **Generator columns with data-file values skip the generator.** If a row in the data file supplies a value for a `GENERATOR` column, that value is used and the generator is not invoked for that row. This is intentional (for conflict rows that need specific values) but can cause gaps in a `SEQUENCE`.
 - **`SEQUENCE` resets per table, not per file.** If a table has multiple files, the sequence counter continues across files (it does not reset between them).
+- **`GROUPED_SEQUENCE` resets on change, not per group.** It only compares each row to the immediately preceding row's `groupByColumn` value — non-contiguous groups (e.g. `IT, MARKETING, IT`) reset the counter every time the value changes, they don't resume where that group left off. Sort the data file by `groupByColumn` for a clean per-group sequence.
 
 ### Schema
 

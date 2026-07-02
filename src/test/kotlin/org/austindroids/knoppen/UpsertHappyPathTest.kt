@@ -3,6 +3,7 @@ package org.austindroids.knoppen
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainAll
+import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldContainInOrder
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
@@ -107,7 +108,7 @@ class UpsertHappyPathTest : FunSpec({
         test("correct statement counts per table") {
             val byTable = result.sql.groupBy { it.table }
 
-            byTable["tag"]!!           shouldHaveSize 6
+            byTable["tag"]!!           shouldHaveSize 8
             byTable["users"]!!         shouldHaveSize 7
             byTable["post"]!!          shouldHaveSize 6
             byTable["post_tag"]!!      shouldHaveSize 8
@@ -134,17 +135,23 @@ class UpsertHappyPathTest : FunSpec({
                 }
         }
 
-        test("SEQUENCE generator produces ascending column_order values for tag") {
+        test("GROUPED_SEQUENCE resets column_order when category changes") {
+            // column_order is the last declared column, so its value is the last
+            // line inside the VALUES (...) tuple.
+            fun columnOrderOf(sql: String): Int =
+                Regex("""VALUES\s*\(([\s\S]*?)\)\s*ON CONFLICT""")
+                    .find(sql)!!.groupValues[1]
+                    .trim().lines().last().trim().trimEnd(',').toInt()
+
             val orders = result.sql
                 .filter { it.table == "tag" }
-                .mapNotNull { stmt ->
-                    Regex("""column_order\s*=\s*(\d+)""")
-                        .find(stmt.sql)?.groupValues?.get(1)?.toIntOrNull()
-                }
+                .sortedBy { it.rowIndex }
+                .map { columnOrderOf(it.sql) }
 
-            orders.zipWithNext { a, b -> b - a }.forEach { delta ->
-                delta shouldBe 10
-            }
+            // rows 0-2: category IT      → 0, 10, 20
+            // rows 3-6: category SPORTS  → group change resets to 0, then 10, 20, 30
+            // row 7:    still SPORTS (duplicate PK / DO NOTHING row) → continues at 40
+            orders shouldContainExactly listOf(0, 10, 20, 0, 10, 20, 30, 40)
         }
 
         // ── Relational tables ─────────────────────────────────────────────

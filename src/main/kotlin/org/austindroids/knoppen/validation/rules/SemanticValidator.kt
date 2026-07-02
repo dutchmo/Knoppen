@@ -14,6 +14,8 @@ import tools.jackson.databind.JsonNode
  *  - pattern constraint regex must compile without errors
  *  - FUNCTION defaults must have a non-blank value
  *  - conflictTarget:true is only meaningful on a "unique" constraint
+ *  - GROUPED_SEQUENCE's groupByColumn must exist in this table's columns
+ *  - FOREIGN_CYCLE's table and column must both be declared in this schema file
  */
 class SemanticValidator {
 
@@ -42,7 +44,7 @@ class SemanticValidator {
 
                 validateForeignKey(context, column, colPath, colName, knownTables)
                 validateConstraints(context, column, colPath, colName)
-                validateDefault(context, column, colPath, colName)
+                validateDefault(context, column, colPath, colName, columnNames, tables)
             }
         }
     }
@@ -264,7 +266,9 @@ class SemanticValidator {
         context: RuleContext,
         column: JsonNode,
         colPath: String,
-        colName: String
+        colName: String,
+        columnNames: Set<String>,
+        tables: JsonNode
     ) {
         val default = column.path("default")
         if (default.isMissingNode) return
@@ -294,6 +298,81 @@ class SemanticValidator {
             }
             "LITERAL" -> { /* any non-blank string is valid */ }
             "EXPRESSION" -> { /* any non-blank string is valid — rendered as-is */ }
+            "GENERATOR" -> validateGenerator(context, value, colPath, colName, columnNames, tables)
+        }
+    }
+
+    // ── Generator Expressions ────────────────────────────────────────────────
+
+    /**
+     * Cross-references the arguments of GENERATOR default expressions against
+     * the schema — these can't be checked by JSON Schema since they're embedded
+     * in a free-form string ([value]).
+     */
+    private fun validateGenerator(
+        context: RuleContext,
+        value: String,
+        colPath: String,
+        colName: String,
+        columnNames: Set<String>,
+        tables: JsonNode
+    ) {
+        val trimmed = value.trim()
+        val name    = trimmed.substringBefore("(").uppercase().trim()
+        val argStr  = trimmed.substringAfter("(", "").substringBeforeLast(")", "").trim()
+        val args    = if (argStr.isEmpty()) emptyList() else argStr.split(",").map { it.trim() }
+
+        when (name) {
+            "GROUPED_SEQUENCE" -> validateGroupedSequence(context, args, colPath, colName, columnNames)
+            "FOREIGN_CYCLE"    -> validateForeignCycle(context, args, colPath, colName, tables)
+        }
+    }
+
+    private fun validateGroupedSequence(
+        context: RuleContext,
+        args: List<String>,
+        colPath: String,
+        colName: String,
+        columnNames: Set<String>
+    ) {
+        val groupByColumn = args.getOrNull(0) ?: return  // arg-count errors surface at generation time
+        if (groupByColumn !in columnNames) {
+            context.error(
+                "$colPath/default/value",
+                "Column '$colName': GROUPED_SEQUENCE references column '$groupByColumn'" +
+                        " which is not declared in this table's columns"
+            )
+        }
+    }
+
+    private fun validateForeignCycle(
+        context: RuleContext,
+        args: List<String>,
+        colPath: String,
+        colName: String,
+        tables: JsonNode
+    ) {
+        val targetTable = args.getOrNull(0) ?: return  // arg-count errors surface at generation time
+        val targetTableNode = tables.find { it.path("tableName").asString(null) == targetTable }
+        if (targetTableNode == null) {
+            context.error(
+                "$colPath/default/value",
+                "Column '$colName': FOREIGN_CYCLE references table '$targetTable'" +
+                        " which is not declared in this schema file"
+            )
+            return
+        }
+
+        val targetColumn = args.getOrNull(1) ?: return
+        val targetColumnNames = targetTableNode.path("columns")
+            .mapNotNull { it.path("name").asString(null) }
+            .toSet()
+        if (targetColumn !in targetColumnNames) {
+            context.error(
+                "$colPath/default/value",
+                "Column '$colName': FOREIGN_CYCLE references column '$targetColumn'" +
+                        " which is not declared in table '$targetTable'"
+            )
         }
     }
 }

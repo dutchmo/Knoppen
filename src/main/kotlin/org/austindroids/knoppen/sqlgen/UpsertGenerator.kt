@@ -419,6 +419,7 @@ class UpsertGenerator(
 
             for ((rowIndex, rowNode) in rows.withIndex()) {
                 val baseFields      = flattenNode(rowNode)
+                generatorContext.setCurrentRow(baseFields)
                 val generatedFields = generators
                     .filter { (colName, _) -> colName !in baseFields }
                     .mapValues { (_, gen) -> gen.next(rowIndex) }

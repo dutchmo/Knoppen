@@ -32,6 +32,52 @@ class SequenceGenerator(
     override fun reset() { current = start }
 }
 
+// ── GROUPED_SEQUENCE ─────────────────────────────────────────────────────────
+
+/**
+ * Produces a numeric sequence that resets to [start] whenever the value of
+ * [groupByColumn] in the current row differs from the previous row's value.
+ *
+ * GROUPED_SEQUENCE(department_name, 0, 10) over rows grouped by department:
+ *   IT, IT, IT, MARKETING, MARKETING →  0, 10, 20, 0, 10
+ *
+ * Rows are compared to the immediately preceding row only — this is a
+ * change-detection reset, not a true per-group counter. If a group's rows
+ * are not contiguous in the data file, the sequence resets again each time
+ * the group value changes back.
+ */
+class GroupedSequenceGenerator(
+    private val groupByColumn: String,
+    private val start: Long,
+    private val step: Long,
+    private val context: GeneratorContext
+) : ColumnGenerator {
+    private var current: Long = start
+    private var lastGroupValue: Any? = UNSET
+
+    override fun next(rowIndex: Int): Any? {
+        val groupValue = context.currentRowValue(groupByColumn)
+        if (groupValue != lastGroupValue) {
+            current = start
+            lastGroupValue = groupValue
+        }
+        val value = current
+        current += step
+        return value
+    }
+
+    override fun reset() {
+        current = start
+        lastGroupValue = UNSET
+    }
+
+    private companion object {
+        // Sentinel distinct from any real column value (including null) so the
+        // very first row always triggers a reset.
+        val UNSET = Any()
+    }
+}
+
 // ── TEMPLATE ──────────────────────────────────────────────────────────────────
 
 /**

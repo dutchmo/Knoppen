@@ -15,6 +15,12 @@ class GeneratorContext {
     // tableName → columnName → ordered list of generated values
     private val generated = mutableMapOf<String, MutableMap<String, MutableList<Any?>>>()
 
+    // Fields (data-file values merged with already-computed generated values) of the
+    // row currently being generated — set by UpsertGenerator before invoking generators
+    // for that row. Used by generators like GroupedSequenceGenerator that need to read
+    // another column's value from the same row.
+    private var currentRow: Map<String, Any?> = emptyMap()
+
     fun recordGeneratedValue(table: String, column: String, value: Any?) {
         generated
             .getOrPut(table)  { mutableMapOf() }
@@ -28,4 +34,12 @@ class GeneratorContext {
      */
     fun valuesFor(table: String, column: String): List<Any?> =
         generated[table]?.get(column) ?: emptyList()
+
+    /** Called once per row, before its generators run, to make the row's own fields visible. */
+    fun setCurrentRow(fields: Map<String, Any?>) {
+        currentRow = fields
+    }
+
+    /** The value of [column] in the row currently being generated, or null if absent. */
+    fun currentRowValue(column: String): Any? = currentRow[column]
 }

@@ -45,7 +45,7 @@ data class TableSchema(
 data class OnConflictConfig(
     val target: List<String>,                       // Columns used in ON CONFLICT (...) clause
     val action: OnConflictAction,                   // DO UPDATE or DO NOTHING
-    val excludeFromUpdate: List<String> = emptyList() // Columns never overwritten on conflict
+    val excludeFromUpdate: List<String> = emptyList() // Columns never oveorwritten on conflict
 )
 
 @Serializable

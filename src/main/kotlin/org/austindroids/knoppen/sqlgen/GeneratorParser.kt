@@ -8,6 +8,7 @@ package org.austindroids.knoppen.sqlgen
  *
  *   SEQUENCE(start, step)
  *   SEQUENCE(start, step, suffix)
+ *   GROUPED_SEQUENCE(groupByColumn, start, step)
  *   COUNTER(start)
  *   TEMPLATE(pattern)
  *   TIMESTAMP_OFFSET(unit, step)
@@ -42,6 +43,7 @@ object GeneratorParser {
 
         return when (name) {
             "SEQUENCE"         -> parseSequence(args, expression)
+            "GROUPED_SEQUENCE" -> parseGroupedSequence(args, expression, generatorContext)
             "COUNTER"          -> parseCounter(args, expression)
             "TEMPLATE"         -> parseTemplate(argStr, expression)  // pass raw — may contain commas
             "TIMESTAMP_OFFSET" -> parseTimestampOffset(args, expression)
@@ -51,7 +53,7 @@ object GeneratorParser {
             "FOREIGN_CYCLE"    -> parseForeignCycle(args, expression, generatorContext)
             else -> throw IllegalArgumentException(
                 "Unknown generator '$name' in expression '$expression'. " +
-                        "Available: SEQUENCE, COUNTER, TEMPLATE, TIMESTAMP_OFFSET, " +
+                        "Available: SEQUENCE, GROUPED_SEQUENCE, COUNTER, TEMPLATE, TIMESTAMP_OFFSET, " +
                         "UUID, CYCLE, DISTRIBUTE, FOREIGN_CYCLE"
             )
         }
@@ -71,6 +73,30 @@ object GeneratorParser {
         require(step != 0L) { "SEQUENCE step must not be zero" }
         val suffix = args.getOrNull(2) ?: ""
         return SequenceGenerator(start, step, suffix)
+    }
+
+    private fun parseGroupedSequence(
+        args: List<String>,
+        raw: String,
+        context: GeneratorContext?
+    ): ColumnGenerator {
+        require(args.size == 3) {
+            "GROUPED_SEQUENCE requires 3 arguments: " +
+                    "GROUPED_SEQUENCE(groupByColumn, start, step). Got: '$raw'"
+        }
+        requireNotNull(context) {
+            "GROUPED_SEQUENCE generator requires a GeneratorContext (no context was provided)"
+        }
+        val groupByColumn = args[0].trim()
+        require(groupByColumn.isNotEmpty()) {
+            "GROUPED_SEQUENCE groupByColumn must not be blank. Got: '$raw'"
+        }
+        val start = args[1].toLongOrNull()
+            ?: throw IllegalArgumentException("GROUPED_SEQUENCE start must be an integer, got '${args[1]}'")
+        val step = args[2].toLongOrNull()
+            ?: throw IllegalArgumentException("GROUPED_SEQUENCE step must be an integer, got '${args[2]}'")
+        require(step != 0L) { "GROUPED_SEQUENCE step must not be zero" }
+        return GroupedSequenceGenerator(groupByColumn, start, step, context)
     }
 
     private fun parseCounter(args: List<String>, raw: String): ColumnGenerator {

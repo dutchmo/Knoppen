@@ -47,6 +47,11 @@ tables:
         constraints:
           - constraint: REQUIRED
 
+      - name: category
+        datatype: VARCHAR(50)
+        constraints:
+          - constraint: REQUIRED
+
       - name: name
         datatype: VARCHAR(100)
         constraints:
@@ -61,7 +66,7 @@ tables:
         datatype: INTEGER
         default:
           kind: GENERATOR
-          value: "SEQUENCE(10,10)"
+          value: "GROUPED_SEQUENCE(category, 0, 10)"
 
 
   # ──────────────────────────────────────────────
