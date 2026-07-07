@@ -37,7 +37,7 @@ class MojoHarnessTest : AbstractMojoTestCase() {
     // groupId/artifactId match the plugin descriptor; version is passed by the Gradle
     // test task so the harness role hint (groupId:artifactId:version:goal) resolves.
     private val groupId = "org.austindroids"
-    private val artifactId = "Knoppen"
+    private val artifactId = "knoppen"
     private val version: String = System.getProperty("knoppen.version")
 
     /** Looks up a mojo by goal, taking its `<configuration>` from the given stub POM. */

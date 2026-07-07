@@ -12,7 +12,7 @@
         <plugins>
             <plugin>
                 <groupId>org.austindroids</groupId>
-                <artifactId>Knoppen</artifactId>
+                <artifactId>knoppen</artifactId>
                 <configuration>
                     <schemaFile>src/test/resources/unit/generate-basic/schema.yaml</schemaFile>
                     <outputFormat>RIVER</outputFormat>
