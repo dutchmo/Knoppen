@@ -215,7 +215,7 @@ tasks.register<Jar>("dokkaJar") {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-//  Publishing — two publications, same repositories
+//  Publishing
 //
 //  mavenPlugin  — thin JAR (compiled classes only); POM lists all
 //                 implementation deps so Maven resolves them at
@@ -316,14 +316,15 @@ publishing {
                 password = System.getenv("GITHUB_TOKEN")
             }
         }
-        maven {
+        // Uncomment when ready for Nexus
+/*        maven {
             name = "Nexus"
             url = uri("https://nexus-server/repository/maven-releases/")
             credentials {
                 username = System.getenv("NEXUS_USERNAME")
                 password = System.getenv("NEXUS_PASSWORD")
             }
-        }
+        }*/
     }
 }
 
