@@ -277,6 +277,7 @@ publishing {
         }
 
         create<MavenPublication>("standaloneCli") {
+            artifactId = "Knoppen-cli" // must be different from the mavenPlugin artifactId
             artifact(tasks.shadowJar)
             pom {
                 name.set("Knoppen CLI")
