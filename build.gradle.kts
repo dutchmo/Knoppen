@@ -231,9 +231,6 @@ publishing {
             from(components["java"])
             artifact(tasks["dokkaJar"])
             // Fat standalone JAR as a classifier artifact — single POM
-            artifact(tasks.shadowJar) {
-                classifier = "standalone"
-            }
             artifactId = "knoppen"
             pom {
                 name.set("Knoppen Maven Plugin")
