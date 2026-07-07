@@ -230,6 +230,7 @@ publishing {
         create<MavenPublication>("mavenPlugin") {
             from(components["java"])
             artifact(tasks["dokkaJar"])
+            artifactId = "knoppen"
             pom {
                 name.set("Knoppen Maven Plugin")
                 description.set("A Maven plugin that generates SQL from YAML configuration")
@@ -277,7 +278,7 @@ publishing {
         }
 
         create<MavenPublication>("standaloneCli") {
-            artifactId = "Knoppen-cli" // must be different from the mavenPlugin artifactId
+            artifactId = "knoppen-cli" // must be different from the mavenPlugin artifactId
             artifact(tasks.shadowJar)
             pom {
                 name.set("Knoppen CLI")
