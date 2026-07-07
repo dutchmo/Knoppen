@@ -1,7 +1,7 @@
 // import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 group = "org.austindroids"
-version = "0.5.0"
+version = "0.5.1"
 
 val jacksonver = "3.2.0"
 
