@@ -8,6 +8,11 @@ import org.austindroids.knoppen.schema.SqlType
 import org.austindroids.knoppen.schema.TableSchema
 import org.austindroids.knoppen.sqlgen.DataRow
 import org.austindroids.knoppen.sqlgen.SqlDialect
+import org.austindroids.knoppen.sqlgen.format.AtomicClause
+import org.austindroids.knoppen.sqlgen.format.Clause
+import org.austindroids.knoppen.sqlgen.format.FormatConfig
+import org.austindroids.knoppen.sqlgen.format.ItemizedClause
+import org.austindroids.knoppen.sqlgen.format.SqlFormatter
 import tools.jackson.databind.ObjectMapper
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
@@ -25,13 +30,24 @@ import java.time.format.DateTimeFormatter
  *  - The schema qualifier is prepended when present on the TableSchema.
  *  - Columns in onConflict.excludeFromUpdate are omitted from the DO UPDATE SET clause.
  *  - Column defaults are applied when the data row omits a column entirely.
+ *
+ * Layout (line breaks, indentation, comma placement) is delegated to
+ * [SqlFormatter] via [config]; this class only builds the semantic
+ * [Clause] list and formats the individual SQL values/identifiers.
+ * The ON CONFLICT target list is always rendered as a single [AtomicClause]
+ * (never expanded to one-column-per-line) since it is typically short and
+ * expanding it independently of the config's newline style would be
+ * surprising.
  */
-class PostgresDialect : SqlDialect {
+class PostgresDialect(
+    private val config: FormatConfig = FormatConfig.LEGACY
+) : SqlDialect {
+
+    private val formatter = SqlFormatter(config)
 
     override fun generateUpsert(row: DataRow): String {
-        val schema      = row.schema
-        val onConflict  = schema.onConflict
-        val excludeSet  = onConflict?.excludeFromUpdate?.toSet() ?: emptySet()
+        val schema     = row.schema
+        val excludeSet = schema.onConflict?.excludeFromUpdate?.toSet() ?: emptySet()
 
         // ── Determine which columns to INSERT ─────────────────────────────────
         // Include columns that have a value in the row OR have a default defined.
@@ -42,16 +58,12 @@ class PostgresDialect : SqlDialect {
             row.fields.containsKey(col.name) || (col.default != null && col.default.kind != DefaultType.GENERATOR)
         }
 
-        if (insertColumns.isEmpty()) {
-            throw IllegalArgumentException(
-                "Row for table '${schema.tableName}' has no insertable columns"
-            )
+        require(insertColumns.isNotEmpty()) {
+            "Row for table '${schema.tableName}' has no insertable columns"
         }
 
-        // ── Build column list and value list ──────────────────────────────────
-        val columnList = insertColumns.joinToString(",\n    ") { qq(it.name) }
-
-        val valueList  = insertColumns.joinToString(",\n    ") { col ->
+        val columns = insertColumns.map { qq(it.name) }
+        val values  = insertColumns.map { col ->
             val sqlType  = SqlType.parse(col.datatype)
             val rawValue = row.fields[col.name]
             if (rawValue == null && !row.fields.containsKey(col.name)) {
@@ -62,47 +74,47 @@ class PostgresDialect : SqlDialect {
             }
         }
 
-        // ── ON CONFLICT clause ────────────────────────────────────────────────
-        val conflictClause = buildConflictClause(schema, insertColumns, excludeSet)
-
         // ── Table reference (schema-qualified when schemaName is set) ────────
         val tableRef = if (schema.schemaName.isBlank()) qq(schema.tableName)
                        else "${schema.schemaName}.${schema.tableName}"
 
-        return buildString {
-            appendLine("INSERT INTO $tableRef (")
-            appendLine("    $columnList")
-            appendLine(")")
-            appendLine("VALUES (")
-            appendLine("    $valueList")
-            appendLine(")")
-            append(conflictClause)
-            append(";")
-        }
+        val clauses = buildUpsertClauses(schema, tableRef, columns, values, insertColumns, excludeSet)
+        return formatter.format(clauses)
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Conflict clause builder
+    // Clause builder
     // ─────────────────────────────────────────────────────────────────────────
 
-    private fun buildConflictClause(
+    private fun buildUpsertClauses(
         schema: TableSchema,
+        tableRef: String,
+        columns: List<String>,
+        values: List<String>,
         insertColumns: List<ColumnSchema>,
         excludeSet: Set<String>
-    ): String {
+    ): List<Clause> {
+        val base = mutableListOf<Clause>(
+            ItemizedClause("INSERT INTO $tableRef", columns, parens = true),
+            ItemizedClause("VALUES", values, parens = true)
+        )
+
         val onConflict = schema.onConflict
 
         // If no onConflict defined, fall back to DO NOTHING on PK conflict
         if (onConflict == null) {
             val pkList = schema.primaryKey.joinToString(", ") { qq(it) }
-            return "ON CONFLICT ($pkList) DO NOTHING\n"
+            base += AtomicClause("ON CONFLICT ($pkList)")
+            base += AtomicClause("DO NOTHING")
+            return base
         }
 
         val targetList = onConflict.target.joinToString(", ")
+        base += AtomicClause("ON CONFLICT ($targetList)")
 
-        return when (onConflict.action) {
+        when (onConflict.action) {
             OnConflictAction.DO_NOTHING ->
-                "ON CONFLICT ($targetList) DO NOTHING\n"
+                base += AtomicClause("DO NOTHING")
 
             OnConflictAction.UPDATE -> {
                 // Update all inserted columns except excluded ones and the PK
@@ -111,22 +123,17 @@ class PostgresDialect : SqlDialect {
                     .map { it.name }
                     .filter { it !in excludeSet && it !in pkSet }
 
-                if (updateCols.isEmpty()) {
+                base += if (updateCols.isEmpty()) {
                     // Nothing to update — degrade gracefully to DO NOTHING
-                    "ON CONFLICT ($targetList) DO NOTHING\n"
+                    AtomicClause("DO NOTHING")
                 } else {
-                    val setClauses = updateCols.joinToString(",\n        ") { col ->
-                        "${qq(col)} = EXCLUDED.${qq(col)}"
-                    }
-                    buildString {
-                        appendLine("ON CONFLICT ($targetList)")
-                        appendLine("DO UPDATE SET")
-                        append("    $setClauses")
-                        appendLine()
-                    }
+                    val setClauses = updateCols.map { col -> "${qq(col)} = EXCLUDED.${qq(col)}" }
+                    ItemizedClause("DO UPDATE SET", setClauses)
                 }
             }
         }
+
+        return base
     }
 
     // ─────────────────────────────────────────────────────────────────────────

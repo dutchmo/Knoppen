@@ -62,10 +62,6 @@ dependencies {
     // Database & ORM (unused)
     // implementation("org.ktorm:ktorm-core:4.1.1")
     // implementation("org.ktorm:ktorm-support-postgresql:4.1.1")
-    // implementation("org.postgresql:postgresql:42.7.11")
-
-    // SQL formatting
-    implementation("com.github.vertical-blank:sql-formatter:2.0.5")
 
     // Logging — SLF4J API for compilation; logback as runtime-only so it is
     // bundled in the standalone fat JAR but stripped from the plugin POM via withXml.
@@ -81,6 +77,17 @@ dependencies {
     testImplementation("io.kotest:kotest-assertions-core:$kotestVersion")
     testImplementation("io.kotest:kotest-property:$kotestVersion")
     testImplementation("io.mockk:mockk:1.14.11")
+
+    // Maven plugin integration tests (JUnit5 @MojoTest harness). The harness needs a
+    // Maven runtime (core + compat) on the test classpath; junit-jupiter drives the
+    // plain @Test harness tests alongside the Kotest specs on the JUnit platform.
+    testImplementation("org.apache.maven.plugin-testing:maven-plugin-testing-harness:3.5.1")
+    testImplementation("org.apache.maven:maven-core:3.9.16")
+    testImplementation("org.apache.maven:maven-compat:3.9.16")
+    testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")
+    // AbstractMojoTestCase extends JUnit3 junit.framework.TestCase; provide it (tests
+    // themselves are driven by JUnit5 @Test, we only subclass for its lookup helpers).
+    testImplementation("junit:junit:4.13.2")
 }
 
 configurations.compileOnly.get().extendsFrom(cliOnly)
@@ -89,7 +96,7 @@ kotlin {
     jvmToolchain(24)
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-        freeCompilerArgs.addAll("-Xjsr305=strict")
+        freeCompilerArgs.addAll("-Xjsr305=strict", "-Xcollection-literals", "-Xreturn-value-checker=full")
     }
 }
 
@@ -171,6 +178,9 @@ afterEvaluate {
 
 tasks.test {
     useJUnitPlatform()
+    // The plugin-testing-harness resolves mojos by groupId:artifactId:version:goal;
+    // expose the project version so MojoHarnessTest can build the matching role hint.
+    systemProperty("knoppen.version", project.version.toString())
     testLogging {
         events("passed", "skipped", "failed")
     }

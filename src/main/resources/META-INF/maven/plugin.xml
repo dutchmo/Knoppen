@@ -8,97 +8,146 @@
     <goalPrefix>knoppen</goalPrefix>
 
     <mojos>
+
         <mojo>
-            <goal>validate</goal>
-            <description>Validate YAML configuration against JSON schema</description>
+            <goal>generateSQL</goal>
+            <description>Validate the schema and data files, then generate and write SQL upsert statements.</description>
             <requiresDirectInvocation>false</requiresDirectInvocation>
             <requiresProject>true</requiresProject>
-            <phase>validate</phase>
-            <implementation>org.austindroids.knoppen.mojos.ValidateMojo</implementation>
-            <language>kotlin</language>
+            <phase>generate-sources</phase>
+            <implementation>org.austindroids.knoppen.mojos.GenerateMojo</implementation>
+            <language>java</language>
             <instantiationStrategy>per-lookup</instantiationStrategy>
             <parameters>
-                <parameter>
-                    <name>configFile</name>
-                    <type>java.io.File</type>
-                    <required>false</required>
-                    <editable>true</editable>
-                    <description>The YAML configuration file to validate.</description>
-                </parameter>
                 <parameter>
                     <name>schemaFile</name>
                     <type>java.io.File</type>
                     <required>false</required>
                     <editable>true</editable>
-                    <description>The JSON schema file to validate the configuration against.</description>
+                    <description>The schema YAML file describing the tables and their data files.</description>
                 </parameter>
                 <parameter>
-                    <name>failOnError</name>
+                    <name>strict</name>
                     <type>boolean</type>
                     <required>false</required>
                     <editable>true</editable>
-                    <description>Whether to fail the build when validation errors are found.</description>
+                    <description>Override validation.strictFields from the schema (reject unknown fields when true).</description>
+                </parameter>
+                <parameter>
+                    <name>rootDataPath</name>
+                    <type>java.io.File</type>
+                    <required>false</required>
+                    <editable>true</editable>
+                    <description>Override the rootDataPath declared in the schema YAML.</description>
+                </parameter>
+                <parameter>
+                    <name>rootOutputPath</name>
+                    <type>java.io.File</type>
+                    <required>false</required>
+                    <editable>true</editable>
+                    <description>Override the rootOutputPath declared in the schema YAML.</description>
+                </parameter>
+                <parameter>
+                    <name>outputFormat</name>
+                    <type>java.lang.String</type>
+                    <required>false</required>
+                    <editable>true</editable>
+                    <description>SQL layout preset: LEGACY, SINGLE_LINE, TRADITIONAL, CASCADE2, CASCADE4, RIVER.</description>
+                </parameter>
+                <parameter>
+                    <name>debug</name>
+                    <type>boolean</type>
+                    <required>false</required>
+                    <editable>true</editable>
+                    <description>Raise console logging to DEBUG (Maven itself uses -X).</description>
+                </parameter>
+                <parameter>
+                    <name>skip</name>
+                    <type>boolean</type>
+                    <required>false</required>
+                    <editable>true</editable>
+                    <description>Skip execution of this goal.</description>
                 </parameter>
             </parameters>
             <configuration>
-                <configFile implementation="java.io.File" default-value="${project.basedir}/src/main/resources/bootstrap-config.yaml">${configFile}</configFile>
-                <schemaFile implementation="java.io.File" default-value="${project.basedir}/src/main/resources/schema/config-schema.json">${schemaFile}</schemaFile>
-                <failOnError implementation="boolean" default-value="true">${failOnError}</failOnError>
+                <schemaFile implementation="java.io.File" default-value="${project.basedir}/src/main/resources/schema.yaml">${knoppen.schema}</schemaFile>
+                <strict implementation="boolean" default-value="true">${knoppen.strict}</strict>
+                <rootDataPath implementation="java.io.File">${knoppen.rootDataPath}</rootDataPath>
+                <rootOutputPath implementation="java.io.File">${knoppen.rootOutputPath}</rootOutputPath>
+                <outputFormat implementation="java.lang.String" default-value="LEGACY">${knoppen.outputFormat}</outputFormat>
+                <debug implementation="boolean" default-value="false">${knoppen.debug}</debug>
+                <skip implementation="boolean" default-value="false">${knoppen.skip}</skip>
             </configuration>
         </mojo>
 
         <mojo>
-            <goal>generate</goal>
-            <description>Generate SQL statements from YAML configuration</description>
+            <goal>validate</goal>
+            <description>Validate the schema and its declared data files without generating any SQL.</description>
             <requiresDirectInvocation>false</requiresDirectInvocation>
             <requiresProject>true</requiresProject>
-            <phase>generate-sources</phase>
-            <implementation>org.austindroids.knoppen.mojos.GenerateMojo</implementation>
-            <language>kotlin</language>
+            <phase>validate</phase>
+            <implementation>org.austindroids.knoppen.mojos.ValidateMojo</implementation>
+            <language>java</language>
             <instantiationStrategy>per-lookup</instantiationStrategy>
             <parameters>
                 <parameter>
-                    <name>configFile</name>
+                    <name>schemaFile</name>
                     <type>java.io.File</type>
                     <required>false</required>
                     <editable>true</editable>
-                    <description>The YAML configuration file to generate SQL from.</description>
+                    <description>The schema YAML file describing the tables and their data files.</description>
                 </parameter>
                 <parameter>
-                    <name>outputDirectory</name>
+                    <name>strict</name>
+                    <type>boolean</type>
+                    <required>false</required>
+                    <editable>true</editable>
+                    <description>Override validation.strictFields from the schema (reject unknown fields when true).</description>
+                </parameter>
+                <parameter>
+                    <name>rootDataPath</name>
                     <type>java.io.File</type>
                     <required>false</required>
                     <editable>true</editable>
-                    <description>The directory generated SQL files are written to.</description>
+                    <description>Override the rootDataPath declared in the schema YAML.</description>
                 </parameter>
                 <parameter>
-                    <name>databaseType</name>
+                    <name>rootOutputPath</name>
+                    <type>java.io.File</type>
+                    <required>false</required>
+                    <editable>true</editable>
+                    <description>Override the rootOutputPath declared in the schema YAML.</description>
+                </parameter>
+                <parameter>
+                    <name>outputFormat</name>
                     <type>java.lang.String</type>
                     <required>false</required>
                     <editable>true</editable>
-                    <description>The target SQL dialect.</description>
+                    <description>SQL layout preset: LEGACY, SINGLE_LINE, TRADITIONAL, CASCADE2, CASCADE4, RIVER.</description>
                 </parameter>
                 <parameter>
-                    <name>generateInserts</name>
+                    <name>debug</name>
                     <type>boolean</type>
                     <required>false</required>
                     <editable>true</editable>
-                    <description>Whether to generate INSERT statements.</description>
+                    <description>Raise console logging to DEBUG (Maven itself uses -X).</description>
                 </parameter>
                 <parameter>
-                    <name>generateUpdates</name>
+                    <name>skip</name>
                     <type>boolean</type>
                     <required>false</required>
                     <editable>true</editable>
-                    <description>Whether to generate UPDATE statements.</description>
+                    <description>Skip execution of this goal.</description>
                 </parameter>
             </parameters>
             <configuration>
-                <configFile implementation="java.io.File" default-value="${project.basedir}/src/main/resources/bootstrap-config.yaml">${configFile}</configFile>
-                <outputDirectory implementation="java.io.File" default-value="${project.build.directory}/generated-sql">${outputDirectory}</outputDirectory>
-                <databaseType implementation="java.lang.String" default-value="postgresql">${databaseType}</databaseType>
-                <generateInserts implementation="boolean" default-value="true">${generateInserts}</generateInserts>
-                <generateUpdates implementation="boolean" default-value="true">${generateUpdates}</generateUpdates>
+                <schemaFile implementation="java.io.File" default-value="${project.basedir}/src/main/resources/schema.yaml">${knoppen.schema}</schemaFile>
+                <strict implementation="boolean" default-value="true">${knoppen.strict}</strict>
+                <rootDataPath implementation="java.io.File">${knoppen.rootDataPath}</rootDataPath>
+                <rootOutputPath implementation="java.io.File">${knoppen.rootOutputPath}</rootOutputPath>
+                <outputFormat implementation="java.lang.String" default-value="LEGACY">${knoppen.outputFormat}</outputFormat>
+                <debug implementation="boolean" default-value="false">${knoppen.debug}</debug>
+                <skip implementation="boolean" default-value="false">${knoppen.skip}</skip>
             </configuration>
         </mojo>
     </mojos>

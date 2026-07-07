@@ -7,13 +7,16 @@ import com.github.ajalt.clikt.core.ProgramResult
 import com.github.ajalt.clikt.core.subcommands
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.arguments.help
+import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.help
 import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.types.choice
 import org.austindroids.knoppen.SchemaParser
 import org.austindroids.knoppen.schema.DatabaseSchema
 import org.austindroids.knoppen.sqlgen.UpsertGenerator
 import org.austindroids.knoppen.sqlgen.dialect.PostgresDialect
+import org.austindroids.knoppen.sqlgen.format.FormatConfig
 import org.austindroids.knoppen.validation.SchemaValidator
 import java.nio.file.Path
 import kotlin.io.path.Path
@@ -45,8 +48,18 @@ abstract class BaseKnoppenCommand(name: String) : CliktCommand(name = name) {
     val rootOutputPath by option("--root-output-path")
         .help("Override rootOutputPath declared in the schema YAML")
 
+    val outputFormat by option("--output-format")
+        .choice(outputFormatChoices, ignoreCase = true)
+        .default(FormatConfig.LEGACY)
+        .help("SQL layout style for generated statements (default: LEGACY, matches pre-0.6 output)")
+
     val debug by option("--debug", "-v").flag(default = false)
         .help("Raise console logging to DEBUG (the log file is always DEBUG)")
+
+    companion object {
+        /** Named `FormatConfig` presets accepted by `--output-format` (shared with the Maven plugin). */
+        val outputFormatChoices: Map<String, FormatConfig> = FormatConfig.presetsByName
+    }
 
     /** Must run before any pipeline code (and thus any first slf4j logger use). */
     protected fun configureLogging() {
@@ -109,7 +122,7 @@ class ValidateCommand : BaseKnoppenCommand("validate") {
         val dataPathOverride   = resolveRootDataPathOverride()
         val outputPathOverride = resolveRootOutputPathOverride()
 
-        val generator = UpsertGenerator(dbSchema, PostgresDialect())
+        val generator = UpsertGenerator(dbSchema, PostgresDialect(outputFormat))
         val result    = generator.generateAll(schemaPath, dataPathOverride, outputPathOverride, generateSql = false)
         val elapsedMs = System.currentTimeMillis() - startMs
 
@@ -134,7 +147,7 @@ class GenerateCommand : BaseKnoppenCommand("generate") {
         val dataPathOverride   = resolveRootDataPathOverride()
         val outputPathOverride = resolveRootOutputPathOverride()
 
-        val generator = UpsertGenerator(dbSchema, PostgresDialect())
+        val generator = UpsertGenerator(dbSchema, PostgresDialect(outputFormat))
         val result    = generator.generateAll(schemaPath, dataPathOverride, outputPathOverride)
         val elapsedMs = System.currentTimeMillis() - startMs
 

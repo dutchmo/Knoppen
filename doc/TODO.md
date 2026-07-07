@@ -1,20 +1,31 @@
 
+ON conflict on constraint
+nextval('generic_code_id_seq')
 
-Unsupported features
-SQL format
+
+- **One table per file.** Each data file maps to exactly one table. A file cannot contain rows for multiple tables.
+- **Plain list format required.** YAML files must use a bare list at the top level. The legacy `tableName: [...]` wrapper is tolerated for compatibility but will not be supported indefinitely.
+
+- **Single-column FK validation only.** When a `foreignKey` block lists multiple columns (e.g. a composite FK), only the **first** column in the `columns` list is checked against parent data rows at runtime. The remaining columns are declared but not validated.
+
+- **No `RETURNING` clause.** Generated IDs or timestamps are not captured.
+- **No sequences or identity columns.** Knoppen does not issue `NEXTVAL(...)` or use `DEFAULT` for auto-increment columns. Primary key values must be explicit in the data file or produced by a `GENERATOR`.
+
 Maven Integ
 kotlin Context Parameters
-
+If a class needs a dependency for its entire lifetime, give it a constructor parameter. Context parameters are for things that vary per call chain, not per instan
 Failure tests
 License
 Tutorial stylesheet
 
 Java Include/rust
+ADK
 
 
 isSorted, isSortedBy
 collection literals
 explicit backing fields
+
 
 1 - Write ADRs in a folder to document architectural choices. Reference them in the AGENTS.md. These will and should evolve over time.
 2 - Write a decent AGENTS.md file. Explain the commands, make sure the agent runs the tests/lints/whatever like a good CI would do after every change.

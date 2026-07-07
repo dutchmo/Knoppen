@@ -40,7 +40,7 @@ Operations in the plugin are tied to appropriate Maven lifecycle events.
 
 ### Generation
 ```bash
-  knoppen generate schemas/blog.yaml --no-strict --root-data-path /tmp/data --root-output-path /tmp
+  knoppen generate schemas/blog.yaml --no-strict --root-data-path /tmp/data --root-output-path /tmp --output-format LEGACY
 ```
 
 ### Maven Configuration

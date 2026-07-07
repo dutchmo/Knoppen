@@ -31,6 +31,7 @@ Knoppen reads a YAML schema describing your tables and a set of data files (YAML
    - 8.1 [validate](#81-validate)
    - 8.2 [generate](#82-generate)
    - 8.3 [Shared Options](#83-shared-options)
+   - 8.4 [Output Format](#84-output-format)
 9. [Generated SQL Output](#9-generated-sql-output)
 10. [End-to-End Example](#10-end-to-end-example)
 11. [Restrictions and Known Limitations](#11-restrictions-and-known-limitations)
@@ -784,6 +785,7 @@ knoppen generate myschema.yaml
 ```bash 
 knoppen generate myschema.yaml --root-output-path /tmp/sql
 knoppen generate myschema.yaml --root-output-path /tmp/sql --no-strict --root-data-path /data
+knoppen generate schemas/blog.yaml --no-strict --root-data-path /tmp/data --root-output-path /tmp --output-format LEGACY
 ```  
 
 Exit code `0` = SQL written successfully (warnings are allowed).    
@@ -797,6 +799,7 @@ Exit code `1` = errors found; no SQL file written.
 | `--strict` / `--no-strict` | `--strict`                                         | Overrides the schema's `validation.strictFields`. With `--strict`, any undeclared field in a data row is an **error** that blocks generation. With `--no-strict`, it is a **warning** only. |     |
 | `--root-data-path`         | Schema's `rootDataPath` (else CWD)                 | Overrides the `rootDataPath` in the schema. An absolute path is used directly; a relative path is resolved from CWD. Must exist and be writable.                                            |     |
 | `--root-output-path`       | Schema's `rootOutputPath` (else CWD)               | Overrides the `rootOutputPath` in the schema. An absolute path is used directly; a relative path is resolved from CWD. Must exist and be writable. Each table's `outputFile` is resolved against this directory. |     |
+| `--output-format`          | `LEGACY`                                           | Selects the SQL layout style for generated statements (see §8.4). Accepted values: `LEGACY`, `SINGLE_LINE`, `TRADITIONAL`, `CASCADE2`, `CASCADE4`, `RIVER` (case-insensitive). Only affects `generate` — `validate` accepts the option but never emits SQL. |     |
 
 ### Summary Table
 
@@ -822,12 +825,126 @@ WARN   [table='users', row=3, field='approvedTs', line=43] ...
 ```  
 
 Status is `✓` if no errors for that table's rows, `✗` if any error was found. Full error details are printed below the table.
+
+### 8.4 Output Format
+
+`--output-format` selects how generated statements are laid out — indentation, comma placement, and whether columns/values are inlined or expanded one per line. It has **no effect on the SQL semantics**, only its formatting. This only matters for `generate`; `validate` never writes SQL.
+
+```bash
+knoppen generate schemas/blog.yaml --output-format LEGACY
+knoppen generate schemas/blog.yaml --output-format SINGLE_LINE
+knoppen generate schemas/blog.yaml --output-format RIVER
+```
+
+| Value | Description |
+|-------|-------------|
+| `LEGACY` (default) | Columns/values one per line, trailing commas, 4-space indent. Matches Knoppen's output prior to 0.6 — the default so existing generated files and scripts do not change unexpectedly. |
+| `SINGLE_LINE` | The entire statement on one line. Good for diffs, logs, or piping into other tools. |
+| `TRADITIONAL` | One clause per line (`INSERT INTO`, `VALUES`, `ON CONFLICT`, `DO UPDATE SET`); columns/values stay inline on that clause's line. |
+| `CASCADE2` | Like `LEGACY`, but leading commas and a 2-space indent. |
+| `CASCADE4` | Like `LEGACY`, but leading commas (4-space indent). |
+| `RIVER` | Like `CASCADE4`, but each clause keyword is right-aligned ("river-aligned") to the width of the widest keyword in the statement, per the [sqlstyle.guide](https://www.sqlstyle.guide/) convention. |
+
+> **`ON CONFLICT (...)` is always a single line**, regardless of `--output-format`. Conflict targets are typically short (the primary key or a unique constraint), so they are never expanded across multiple lines.
+
+The same `INSERT ... ON CONFLICT ... DO UPDATE` statement rendered in each style:
+
+**LEGACY:**
+```sql
+INSERT INTO blog.category (
+    "id",
+    "name",
+    "email"
+)
+VALUES (
+    1,
+    'Technology',
+    'a@b.com'
+)
+ON CONFLICT (id)
+DO UPDATE SET
+    "name" = EXCLUDED."name",
+    "email" = EXCLUDED."email"
+;
+```
+
+**SINGLE_LINE:**
+```sql
+INSERT INTO blog.category ("id", "name", "email") VALUES (1, 'Technology', 'a@b.com') ON CONFLICT (id) DO UPDATE SET "name" = EXCLUDED."name", "email" = EXCLUDED."email";
+```
+
+**TRADITIONAL:**
+```sql
+INSERT INTO blog.category ("id", "name", "email")
+VALUES (1, 'Technology', 'a@b.com')
+ON CONFLICT (id)
+DO UPDATE SET "name" = EXCLUDED."name", "email" = EXCLUDED."email";
+```
+
+**CASCADE2:**
+```sql
+INSERT INTO blog.category (
+  "id"
+  , "name"
+  , "email"
+)
+VALUES (
+  1
+  , 'Technology'
+  , 'a@b.com'
+)
+ON CONFLICT (id)
+DO UPDATE SET
+  "name" = EXCLUDED."name"
+  , "email" = EXCLUDED."email"
+;
+```
+
+**CASCADE4:**
+```sql
+INSERT INTO blog.category (
+    "id"
+    , "name"
+    , "email"
+)
+VALUES (
+    1
+    , 'Technology'
+    , 'a@b.com'
+)
+ON CONFLICT (id)
+DO UPDATE SET
+    "name" = EXCLUDED."name"
+    , "email" = EXCLUDED."email"
+;
+```
+
+**RIVER:**
+```sql
+INSERT INTO blog.category (
+    "id"
+    , "name"
+    , "email"
+)
+                   VALUES (
+    1
+    , 'Technology'
+    , 'a@b.com'
+)
+         ON CONFLICT (id)
+            DO UPDATE SET
+    "name" = EXCLUDED."name"
+    , "email" = EXCLUDED."email"
+;
+```
   
 ---  
 
 ## 9. Generated SQL Output
 
 Knoppen writes one SQL file per table by default (resolved from `rootOutputPath` + `outputFile`, or `rootOutputPath/<tableName>.sql`). Tables that declare the same `outputFile` are merged into a single file, in topological order (see §6.5).
+
+The examples below use the default `--output-format LEGACY` layout; see §8.4 for the other layout styles (`SINGLE_LINE`, `TRADITIONAL`, `CASCADE2`, `CASCADE4`, `RIVER`).
 
 Each generated SQL file begins with a comment header listing only the table(s) contained in that file. With default `outputFile` naming, `tag.sql` contains just `tag`:
 
@@ -1120,3 +1237,4 @@ psql -h localhost -U myuser -d mydb -f /tmp/blog_seed/article.sql
 - **Schema file path**: a bare filename (no directory separator) is resolved from CWD. A path containing `/` or `\` is used as-is. There is no support for classpath or URL-based schema references.
 - **`--root-data-path` / `--root-output-path` relative paths** are resolved from CWD, not from the schema file's directory. This differs from a `rootDataPath`/`rootOutputPath` declared *inside* the schema, which is resolved relative to the schema file's directory.
 - **`rootDataPath` / `rootOutputPath` are never created automatically.** Both must already exist and be writable, whether declared in the schema or passed via the CLI; Knoppen reports a validation error rather than creating the directory.
+- **`--output-format` only exposes the six named presets** (`LEGACY`, `SINGLE_LINE`, `TRADITIONAL`, `CASCADE2`, `CASCADE4`, `RIVER`). Custom `FormatConfig` combinations (e.g. a non-default indent width, or `maxLineWidth`/`columnThresholdForExpand` thresholds) require using Knoppen as a library, not the CLI.

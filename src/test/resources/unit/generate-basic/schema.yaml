@@ -1,0 +1,19 @@
+dialect: postgresql
+schema: harness_test
+rootDataPath: data
+rootOutputPath: out
+validation:
+  defaultNullable: true
+  strictFields: false
+tables:
+  - tableName: widget
+    dataFiles: [widget.csv]
+    outputFile: widget.sql
+    primaryKey: [id]
+    onConflict: { target: [id], action: doNothing }
+    columns:
+      - name: id
+        datatype: INTEGER
+        constraints: [{ constraint: REQUIRED }]
+      - name: name
+        datatype: VARCHAR(50)
