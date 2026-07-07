@@ -27,7 +27,8 @@ repositories {
 
 // CLI presentation dependencies (Clikt + transitively Mordant) — compile-only so they never
 // leak into the published mavenPlugin POM. Re-added at runtime only for the shadow (CLI) jar.
-val cliOnly: Configuration by configurations.creating
+val cliOnly = configurations.create("cliOnly")
+val shadowOnly: Configuration = configurations.create("shadowOnly") // to feed the shadow jar
 
 dependencies {
     implementation(kotlin("stdlib"))
@@ -66,7 +67,10 @@ dependencies {
     // Logging — SLF4J API for compilation; logback as runtime-only so it is
     // bundled in the standalone fat JAR but stripped from the plugin POM via withXml.
     implementation("org.slf4j:slf4j-api:2.0.18")
-    runtimeOnly("ch.qos.logback:logback-classic:1.5.34")
+    // runtimeOnly("ch.qos.logback:logback-classic:1.5.34")
+
+
+    shadowOnly("ch.qos.logback:logback-classic:1.5.34")
 
     // CLI — compileOnly (via cliOnly, see below); the maven plugin artifact never needs it.
     cliOnly("com.github.ajalt.clikt:clikt:5.1.0") {
@@ -146,7 +150,7 @@ tasks.jar {
 tasks.shadowJar {
     // Add cliOnly (Clikt/Mordant) alongside the normal runtime deps — compileOnly
     // dependencies are otherwise invisible to shadowJar, which shades runtimeClasspath by default.
-    configurations = listOf(project.configurations.runtimeClasspath.get(), cliOnly)
+    configurations = listOf(project.configurations.runtimeClasspath.get(), cliOnly, shadowOnly)
     archiveClassifier.set("standalone")
     mergeServiceFiles()
     exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA")
@@ -198,14 +202,16 @@ tasks.jacocoTestReport {
 kotest { customGradleTask = true }
 
 dokka {
-    moduleName.set("Knoppen")
+    dokkaPublications.html {
+        moduleName.set("Knoppen")
+    }
 }
 
 tasks.register<Jar>("dokkaJar") {
     description = "dokkaJar"
-    dependsOn(tasks.named("dokkaHtml"))
+    dependsOn(tasks.dokkaGeneratePublicationHtml)
     archiveClassifier.set("javadoc")
-    from(layout.buildDirectory.dir("dokka/html"))
+    from(tasks.dokkaGeneratePublicationHtml.flatMap { it.outputDirectory })
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -250,7 +256,7 @@ publishing {
                 // binding at runtime, so downloading logback would cause conflicts.
                 // Node.get(String) is used for namespace-safe child lookup; name()
                 // returns a QName (not String) when the POM carries xmlns.
-                withXml {
+/*                withXml {
                     @Suppress("UNCHECKED_CAST")
                     val depsNode =
                         (asNode().get("dependencies") as groovy.util.NodeList)
@@ -266,7 +272,7 @@ publishing {
                             )?.text() == "ch.qos.logback"
                         }.toList()
                         .forEach { depsNode.remove(it) }
-                }
+                }*/
             }
         }
 
