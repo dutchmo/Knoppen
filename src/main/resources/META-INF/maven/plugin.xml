@@ -3,7 +3,7 @@
     <name>Knoppen</name>
     <description>Generates SQL from YAML/JSON/CSV data files against a declared schema</description>
     <groupId>org.austindroids</groupId>
-    <artifactId>Knoppen</artifactId>
+    <artifactId>knoppen</artifactId>
     <version>@version@</version>
     <goalPrefix>knoppen</goalPrefix>
 
