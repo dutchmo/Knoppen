@@ -8,13 +8,16 @@ on:
   release:
     types: [created]
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
 
 #    services:
 #      postgres:
-#        image: postgres:15
+#        image: postgres:16
 #        env:
 #          POSTGRES_PASSWORD: test
 #          POSTGRES_DB: testdb
@@ -57,13 +60,13 @@ jobs:
 
 #      - name: Upload standalone JAR to GitHub Release
 #        if: startsWith(github.ref, 'refs/tags/v')
-#        uses: softprops/action-gh-release@v2
+#        uses: softprops/action-gh-release@v3
 #        with:
 #          files: build/libs/*-standalone.jar
 #          fail_on_unmatched_files: true
 
       - name: Upload standalone JAR to GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: build/libs/*-standalone.jar
           tag_name: latest

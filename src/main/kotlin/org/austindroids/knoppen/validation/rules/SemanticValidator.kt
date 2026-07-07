@@ -202,7 +202,7 @@ class SemanticValidator {
     ) {
         val regex = constraint.path("regex").asString(null) ?: return
         try {
-            Regex(regex)
+            val _ = Regex(regex)
         } catch (e: Exception) {
             context.error(
                 "$path/regex",
