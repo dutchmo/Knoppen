@@ -230,6 +230,10 @@ publishing {
         create<MavenPublication>("mavenPlugin") {
             from(components["java"])
             artifact(tasks["dokkaJar"])
+            // Fat standalone JAR as a classifier artifact — single POM
+            artifact(tasks.shadowJar) {
+                classifier = "standalone"
+            }
             artifactId = "knoppen"
             pom {
                 name.set("Knoppen Maven Plugin")
@@ -277,7 +281,7 @@ publishing {
             }
         }
 
-        create<MavenPublication>("standaloneCli") {
+        /* create<MavenPublication>("standaloneCli") {
             artifactId = "knoppen-cli" // must be different from the mavenPlugin artifactId
             artifact(tasks.shadowJar)
             pom {
@@ -303,7 +307,7 @@ publishing {
                     url.set("https://github.com/dutchmo/Knoppen")
                 }
             }
-        }
+        } */
     }
 
     repositories {
