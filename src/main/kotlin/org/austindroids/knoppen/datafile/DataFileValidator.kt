@@ -121,7 +121,10 @@ class DataFileValidator(
         val isRequired = col.constraints.any { it is RequiredConstraint }
 
         if (value == null || value.isNull) {
-            if (isRequired) {
+            // A declared default (LITERAL/FUNCTION/EXPRESSION/GENERATOR) guarantees a
+            // value will be filled in later by UpsertGenerator.buildAllStatements, so a
+            // missing/null raw value isn't actually a violation of REQUIRED here.
+            if (isRequired && col.default == null) {
                 addError(rowIndex, col.name, line,
                     "Field '${col.name}' is required but is missing or null")
             }

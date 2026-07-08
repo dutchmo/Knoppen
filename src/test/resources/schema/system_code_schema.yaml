@@ -1,0 +1,133 @@
+# ============================================================
+# Upsert Validation Schema
+# ============================================================
+# Dialect:  postgresql
+# Schema:   public
+#
+# Mirrors the `system_code` reference-data table (see
+# src/test/resources/system_code.sql). Codes are grouped by
+# `table_name`; this fixture seeds the "name_prefix" group,
+# equivalent to src/test/resources/system_code_inserts.sql.
+# ============================================================
+
+dialect: postgresql
+schema: public
+rootDataPath: ../data
+
+validation:
+  defaultNullable: true
+  strictFields: true
+
+tables:
+
+  # ──────────────────────────────────────────────
+  # TABLE: system_code
+  # Reference/lookup codes grouped by table_name.
+  # ON CONFLICT DO NOTHING on the (table_name, code_value)
+  # natural key — re-running boot/seed data must be safe.
+  # ──────────────────────────────────────────────
+  - tableName: system_code
+    description: "System code table. Codes are grouped by table_name."
+    dataFiles:
+      - system_code.csv
+    primaryKey: [system_code_id]
+
+    onConflict:
+      target: [table_name, code_value]
+      action: doNothing
+
+    columns:
+      - name: system_code_id
+        datatype: NUMERIC(15,0)
+        default:
+          kind: FUNCTION
+          value: nextval('system_code_id_seq')
+        constraints:
+          - constraint: REQUIRED
+
+      - name: row_version
+        datatype: NUMERIC(8,0)
+        default:
+          kind: LITERAL
+          value: "1"
+
+      - name: create_user
+        datatype: VARCHAR
+        default:
+          kind: LITERAL
+          value: "SYSTEM:9999999"
+
+      - name: create_oper
+        datatype: VARCHAR
+        default:
+          kind: LITERAL
+          value: "SYSTEM:9999999"
+
+      - name: create_ts
+        datatype: TIMESTAMPTZ(6)
+        default:
+          kind: FUNCTION
+          value: CURRENT_TIMESTAMP
+
+      - name: update_user
+        datatype: VARCHAR
+        default:
+          kind: LITERAL
+          value: "SYSTEM:9999999"
+
+      - name: update_oper
+        datatype: VARCHAR
+        default:
+          kind: LITERAL
+          value: "SYSTEM:9999999"
+
+      - name: update_ts
+        datatype: TIMESTAMPTZ(6)
+        default:
+          kind: FUNCTION
+          value: CURRENT_TIMESTAMP
+
+      - name: row_source
+        datatype: VARCHAR(85)
+        default:
+          kind: LITERAL
+          value: "BOOT_90000"
+
+      - name: system_code_custom_class
+        datatype: VARCHAR
+
+      - name: system_code_custom_data
+        datatype: JSONB
+
+      - name: table_name
+        datatype: VARCHAR(50)
+        constraints:
+          - constraint: REQUIRED
+
+      - name: code_order
+        datatype: NUMERIC(8,0)
+        default:
+          kind: GENERATOR
+          value: GROUPED_SEQUENCE(table_name, 10, 10)
+        constraints:
+          - constraint: REQUIRED
+
+      - name: code_value
+        datatype: VARCHAR(40)
+        constraints:
+          - constraint: REQUIRED
+
+      - name: code_label
+        datatype: VARCHAR(100)
+
+      - name: descr_text
+        datatype: TEXT
+
+      - name: conversion_categoryid
+        datatype: INTEGER
+
+      - name: alternate_value
+        datatype: VARCHAR(30)
+
+      - name: init_data
+        datatype: JSONB
