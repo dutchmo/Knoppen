@@ -1,0 +1,34 @@
+# ============================================================
+# Minimal fixture — multi-row batching / duplicate-conflict-key
+# split behavior (see UpsertGeneratorMultiRowTest).
+# ============================================================
+
+dialect: postgresql
+schema: multirow_test
+rootDataPath: ../data
+
+validation:
+  defaultNullable: true
+  strictFields: false
+
+tables:
+  - tableName: widget
+    description: "No column-presence mismatch — every row has both columns"
+    dataFiles:
+      - widget.yaml
+    primaryKey: [id]
+
+    onConflict:
+      target: [id]
+      action: update
+
+    columns:
+      - name: id
+        datatype: INTEGER
+        constraints:
+          - constraint: REQUIRED
+
+      - name: label
+        datatype: VARCHAR(50)
+        constraints:
+          - constraint: REQUIRED

@@ -28,6 +28,17 @@ interface SqlDialect {
     fun generateUpsert(row: DataRow): String
 
     /**
+     * Produces one upsert statement covering all of [rows] (a single `INSERT`
+     * with multiple `VALUES` tuples where the dialect supports it).
+     *
+     * [rows] must all belong to the same table. The default implementation
+     * simply concatenates one statement per row, so a dialect that hasn't
+     * implemented true multi-row support yet still behaves correctly.
+     */
+    fun generateMultiRowUpsert(rows: List<DataRow>): String =
+        rows.joinToString("\n") { generateUpsert(it) }
+
+    /**
      * Formats a Kotlin/YAML value for embedding in a SQL literal.
      * Implementations must handle quoting, escaping, and type casting.
      */

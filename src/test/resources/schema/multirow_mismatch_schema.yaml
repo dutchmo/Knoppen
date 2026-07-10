@@ -1,0 +1,37 @@
+# ============================================================
+# Minimal fixture — multi-row column-presence mismatch error
+# (see UpsertGeneratorMultiRowTest).
+# ============================================================
+
+dialect: postgresql
+schema: multirow_mismatch_test
+rootDataPath: ../data
+
+validation:
+  defaultNullable: true
+  strictFields: false
+
+tables:
+  - tableName: widget_mismatch
+    description: "row[1] omits the no-default 'note' column that row[0] supplies"
+    dataFiles:
+      - widget_mismatch.yaml
+    primaryKey: [id]
+
+    onConflict:
+      target: [id]
+      action: doNothing
+
+    columns:
+      - name: id
+        datatype: INTEGER
+        constraints:
+          - constraint: REQUIRED
+
+      - name: label
+        datatype: VARCHAR(50)
+        constraints:
+          - constraint: REQUIRED
+
+      - name: note
+        datatype: VARCHAR(50)

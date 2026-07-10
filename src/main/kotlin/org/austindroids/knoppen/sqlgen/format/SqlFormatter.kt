@@ -48,8 +48,9 @@ class SqlFormatter(private val config: FormatConfig) {
                  else clause.keyword
 
         when (clause) {
-            is AtomicClause  -> append(kw)
-            is ItemizedClause -> renderItemized(kw, clause, expandAllItems)
+            is AtomicClause    -> append(kw)
+            is ItemizedClause  -> renderItemized(kw, clause, expandAllItems)
+            is RowValuesClause -> renderRowValues(kw, clause)
         }
     }
 
@@ -88,6 +89,38 @@ class SqlFormatter(private val config: FormatConfig) {
                 append("\n")
             }
             if (clause.parens) append(")")
+        }
+    }
+
+    private fun StringBuilder.renderRowValues(kw: String, clause: RowValuesClause) {
+        if (clause.rows.isEmpty()) {
+            append(kw)
+            return
+        }
+
+        val tuples = clause.rows.map { row -> "(" + row.joinToString(", ") + ")" }
+
+        if (config.newlineStyle == NewlineStyle.SINGLE_LINE) {
+            // Inline: KEYWORD (v1, v2), (v3, v4)
+            append("$kw ${tuples.joinToString(", ")}")
+            return
+        }
+
+        // One row-tuple per line — the tuple itself is never split across lines.
+        // Newlines are placed *between* tuples (not trailing after the last one)
+        // so no blank line appears before the next clause.
+        val indentStr = " ".repeat(config.indent)
+        append(kw)
+        append("\n")
+        tuples.forEachIndexed { i, tuple ->
+            if (i > 0) append("\n")
+            append(indentStr)
+            when (config.commaPosition) {
+                CommaPosition.LEADING ->
+                    if (i == 0) append(tuple) else append(", $tuple")
+                CommaPosition.TRAILING ->
+                    if (i == tuples.lastIndex) append(tuple) else append("$tuple,")
+            }
         }
     }
 

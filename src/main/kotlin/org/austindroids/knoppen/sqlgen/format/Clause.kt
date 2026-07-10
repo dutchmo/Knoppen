@@ -25,3 +25,17 @@ data class ItemizedClause(
     val items: List<String>,
     val parens: Boolean = false
 ) : Clause()
+
+/**
+ * A multi-row VALUES clause: KEYWORD (v1, v2), (v3, v4), ...
+ *
+ * Each inner list of [rows] is one row's already-formatted values, in column
+ * order. Unlike [ItemizedClause], a row-tuple is always rendered inline
+ * (`(v1, v2)`) regardless of format style — only the tuple-to-tuple join
+ * (single line vs. one tuple per line) varies, since splitting an individual
+ * tuple's columns across lines would make a large batch unreadable.
+ */
+data class RowValuesClause(
+    override val keyword: String,
+    val rows: List<List<String>>
+) : Clause()

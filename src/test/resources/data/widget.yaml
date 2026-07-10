@@ -1,0 +1,16 @@
+# row[0] and row[1] intentionally share id=1 (ON CONFLICT DO UPDATE test row) to
+# exercise the multi-row batching duplicate-conflict-key split.
+- id: 1
+  label: "one"
+
+- id: 1
+  label: "one-updated"
+
+- id: 2
+  label: "two"
+
+- id: 3
+  label: "three"
+
+- id: 4
+  label: "four"

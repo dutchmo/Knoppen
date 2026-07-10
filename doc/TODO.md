@@ -1,10 +1,5 @@
 
 
-maven skip variable
-
-checksum if need regeneration
-
-
 ON conflict on constraint
 nextval('generic_code_id_seq')
 

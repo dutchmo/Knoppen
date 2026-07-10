@@ -5,11 +5,15 @@ import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldEndWith
+import io.kotest.matchers.string.shouldStartWith
 import org.austindroids.knoppen.datafile.DataValidationError
 import org.austindroids.knoppen.sqlgen.UpsertGenerator
 import org.austindroids.knoppen.sqlgen.dialect.PostgresDialect
 import org.austindroids.knoppen.validation.SchemaValidator
 import java.nio.file.Path
+import java.util.zip.CRC32
+import kotlin.io.path.readText
 
 // ============================================================
 // SystemCodeTest.kt
@@ -133,7 +137,7 @@ class SystemCodeTest : FunSpec({
 
         test("GROUPED_SEQUENCE resets code_order when table_name group changes") {
             val orders = result.sql
-                .sortedBy { it.rowIndex }
+                .sortedBy { it.rowRange.first }
                 .map { fieldValue(it.sql, "code_order").toInt() }
 
             // rows 0-28:  name_prefix  → 10, 20, ..., 290 (29 values)
@@ -141,6 +145,42 @@ class SystemCodeTest : FunSpec({
             val expectedPrefix = (1..29).map { it * 10 }
             val expectedSuffix = (1..50).map { it * 10 }
             orders shouldBe expectedPrefix + expectedSuffix
+        }
+
+        context("YAML front-matter header") {
+            val header by lazy { result.toSqlString().substringBefore("\n\n-- Table:") }
+
+            test("opens and closes with a --- delimiter") {
+                header shouldStartWith "-- ---"
+                header shouldEndWith "-- ---"
+            }
+
+            test("title/user/created/statements values are left-aligned to the same column") {
+                val keyAndPadding = Regex("""^-- \w+:( +)""")
+                val valueStartColumns = listOf("title", "user", "created", "statements").map { key ->
+                    val line = header.lines().first { it.startsWith("-- $key:") }
+                    keyAndPadding.find(line)!!.value.length
+                }
+                valueStartColumns.toSet() shouldHaveSize 1
+            }
+
+            test("statements count matches the total number of generated rows") {
+                header shouldContain "-- statements:   79 statement(s)"
+            }
+
+            test("lists the data file with its real line count and checksum") {
+                val csvPath = Path.of("src/test/resources/data/system_code.csv")
+                val content = csvPath.readText()
+                val expectedLines = content.lines().let {
+                    if (it.isNotEmpty() && it.last().isEmpty()) it.size - 1 else it.size
+                }
+                val expectedChecksum = CRC32().apply { update(content.toByteArray()) }.value
+
+                header shouldContain "-- system_code:"
+                header shouldContain "--   system_code.csv:"
+                header shouldContain "--     lines: $expectedLines"
+                header shouldContain "--     checksum: $expectedChecksum"
+            }
         }
     }
 })

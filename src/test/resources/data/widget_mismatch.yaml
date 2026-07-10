@@ -1,0 +1,6 @@
+- id: 1
+  label: "one"
+  note: "has a note"
+
+- id: 2
+  label: "two"

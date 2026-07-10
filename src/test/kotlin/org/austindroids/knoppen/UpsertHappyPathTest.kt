@@ -145,7 +145,7 @@ class UpsertHappyPathTest : FunSpec({
 
             val orders = result.sql
                 .filter { it.table == "tag" }
-                .sortedBy { it.rowIndex }
+                .sortedBy { it.rowRange.first }
                 .map { columnOrderOf(it.sql) }
 
             // rows 0-2: category IT      → 0, 10, 20
@@ -196,7 +196,7 @@ class UpsertHappyPathTest : FunSpec({
             // The ON CONFLICT update row (bob ADMIN) is at merged rowIndex 2.
             val conflictRow = result.sql
                 .filter { it.table == "users" }
-                .find { it.rowIndex == 2 }
+                .find { it.rowRange == 2..2 }
 
             conflictRow shouldNotBe null
             conflictRow!!.sql shouldContain "ON CONFLICT"
@@ -208,7 +208,7 @@ class UpsertHappyPathTest : FunSpec({
             // post.yaml rows: id100(0), id101(1), id102(2), id103(3), id104(4), id101-conflict(5)
             val conflictRow = result.sql
                 .filter { it.table == "post" }
-                .find { it.rowIndex == 5 }
+                .find { it.rowRange == 5..5 }
 
             conflictRow shouldNotBe null
             conflictRow!!.sql shouldContain "ON CONFLICT"

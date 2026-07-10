@@ -12,6 +12,7 @@ import org.austindroids.knoppen.sqlgen.format.AtomicClause
 import org.austindroids.knoppen.sqlgen.format.Clause
 import org.austindroids.knoppen.sqlgen.format.FormatConfig
 import org.austindroids.knoppen.sqlgen.format.ItemizedClause
+import org.austindroids.knoppen.sqlgen.format.RowValuesClause
 import org.austindroids.knoppen.sqlgen.format.SqlFormatter
 import tools.jackson.databind.ObjectMapper
 import java.time.OffsetDateTime
@@ -46,24 +47,80 @@ class PostgresDialect(
     private val formatter = SqlFormatter(config)
 
     override fun generateUpsert(row: DataRow): String {
-        val schema     = row.schema
-        val excludeSet = schema.onConflict?.excludeFromUpdate?.toSet() ?: emptySet()
-
-        // ── Determine which columns to INSERT ─────────────────────────────────
-        // Include columns that have a value in the row OR have a default defined.
-        // Columns with neither are omitted (they will get DB-level DEFAULT/NULL).
-        // GENERATOR columns are always resolved before this point and will be
-        // present in row.fields — they must never fall through to renderDefault().
-        val insertColumns = schema.columns.filter { col ->
-            row.fields.containsKey(col.name) || (col.default != null && col.default.kind != DefaultType.GENERATOR)
-        }
+        val schema        = row.schema
+        val excludeSet     = schema.onConflict?.excludeFromUpdate?.toSet() ?: emptySet()
+        val insertColumns = resolveInsertColumns(schema, row)
 
         require(insertColumns.isNotEmpty()) {
             "Row for table '${schema.tableName}' has no insertable columns"
         }
 
         val columns = insertColumns.map { qq(it.name) }
-        val values  = insertColumns.map { col ->
+        val values  = formatRowValues(row, insertColumns)
+
+        val clauses = mutableListOf<Clause>(
+            ItemizedClause("INSERT INTO ${tableRef(schema)}", columns, parens = true),
+            ItemizedClause("VALUES", values, parens = true)
+        )
+        clauses += buildConflictClauses(schema, insertColumns, excludeSet)
+        return formatter.format(clauses)
+    }
+
+    override fun generateMultiRowUpsert(rows: List<DataRow>): String {
+        require(rows.isNotEmpty()) { "generateMultiRowUpsert requires at least one row" }
+        val schema = rows.first().schema
+        require(rows.all { it.schema.tableName == schema.tableName }) {
+            "generateMultiRowUpsert requires all rows to belong to the same table " +
+                "(got: ${rows.map { it.schema.tableName }.distinct()})"
+        }
+        val excludeSet     = schema.onConflict?.excludeFromUpdate?.toSet() ?: emptySet()
+        val insertColumns = resolveInsertColumns(schema, rows.first())
+
+        require(insertColumns.isNotEmpty()) {
+            "Rows for table '${schema.tableName}' have no insertable columns"
+        }
+        // Defensive: callers (UpsertGenerator) are expected to guarantee every row in a
+        // batch shares the same insertable columns before calling this. A single INSERT
+        // statement can only declare one column list, so a mismatch here is a caller bug.
+        rows.forEach { row ->
+            val rowColumns = resolveInsertColumns(schema, row)
+            require(rowColumns == insertColumns) {
+                "Rows in the same multi-row batch for table '${schema.tableName}' must share the same " +
+                    "insertable columns; expected ${insertColumns.map { it.name }} but a row has " +
+                    "${rowColumns.map { it.name }}"
+            }
+        }
+
+        val columns   = insertColumns.map { qq(it.name) }
+        val rowTuples = rows.map { row -> formatRowValues(row, insertColumns) }
+
+        val clauses = mutableListOf<Clause>(
+            ItemizedClause("INSERT INTO ${tableRef(schema)}", columns, parens = true),
+            RowValuesClause("VALUES", rowTuples)
+        )
+        clauses += buildConflictClauses(schema, insertColumns, excludeSet)
+        return formatter.format(clauses)
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Shared row/clause helpers
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Determines which columns to INSERT for [row]: columns that have a value in
+     * the row OR have a default defined. Columns with neither are omitted (they
+     * will get DB-level DEFAULT/NULL). GENERATOR columns are always resolved
+     * before this point and will be present in [DataRow.fields] — they must
+     * never fall through to [renderDefault].
+     */
+    private fun resolveInsertColumns(schema: TableSchema, row: DataRow): List<ColumnSchema> =
+        schema.columns.filter { col ->
+            row.fields.containsKey(col.name) || (col.default != null && col.default.kind != DefaultType.GENERATOR)
+        }
+
+    /** Formats [row]'s values for each of [insertColumns], in order. */
+    private fun formatRowValues(row: DataRow, insertColumns: List<ColumnSchema>): List<String> =
+        insertColumns.map { col ->
             val sqlType  = SqlType.parse(col.datatype)
             val rawValue = row.fields[col.name]
             if (rawValue == null && !row.fields.containsKey(col.name)) {
@@ -74,47 +131,38 @@ class PostgresDialect(
             }
         }
 
-        // ── Table reference (schema-qualified when schemaName is set) ────────
-        val tableRef = if (schema.schemaName.isBlank()) qq(schema.tableName)
-                       else "${schema.schemaName}.${schema.tableName}"
+    /** Schema-qualified table reference (schema-qualified when schemaName is set). */
+    private fun tableRef(schema: TableSchema): String =
+        if (schema.schemaName.isBlank()) qq(schema.tableName)
+        else "${schema.schemaName}.${schema.tableName}"
 
-        val clauses = buildUpsertClauses(schema, tableRef, columns, values, insertColumns, excludeSet)
-        return formatter.format(clauses)
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Clause builder
-    // ─────────────────────────────────────────────────────────────────────────
-
-    private fun buildUpsertClauses(
+    /**
+     * Builds the `ON CONFLICT` / `DO NOTHING` / `DO UPDATE SET` clauses. These are
+     * entirely schema-driven (never per-row), so the same clauses apply whether
+     * generating one statement per row or one statement per batch of rows.
+     */
+    private fun buildConflictClauses(
         schema: TableSchema,
-        tableRef: String,
-        columns: List<String>,
-        values: List<String>,
         insertColumns: List<ColumnSchema>,
         excludeSet: Set<String>
     ): List<Clause> {
-        val base = mutableListOf<Clause>(
-            ItemizedClause("INSERT INTO $tableRef", columns, parens = true),
-            ItemizedClause("VALUES", values, parens = true)
-        )
-
+        val clauses = mutableListOf<Clause>()
         val onConflict = schema.onConflict
 
         // If no onConflict defined, fall back to DO NOTHING on PK conflict
         if (onConflict == null) {
             val pkList = schema.primaryKey.joinToString(", ") { qq(it) }
-            base += AtomicClause("ON CONFLICT ($pkList)")
-            base += AtomicClause("DO NOTHING")
-            return base
+            clauses += AtomicClause("ON CONFLICT ($pkList)")
+            clauses += AtomicClause("DO NOTHING")
+            return clauses
         }
 
         val targetList = onConflict.target.joinToString(", ")
-        base += AtomicClause("ON CONFLICT ($targetList)")
+        clauses += AtomicClause("ON CONFLICT ($targetList)")
 
         when (onConflict.action) {
             OnConflictAction.DO_NOTHING ->
-                base += AtomicClause("DO NOTHING")
+                clauses += AtomicClause("DO NOTHING")
 
             OnConflictAction.UPDATE -> {
                 // Update all inserted columns except excluded ones and the PK
@@ -123,7 +171,7 @@ class PostgresDialect(
                     .map { it.name }
                     .filter { it !in excludeSet && it !in pkSet }
 
-                base += if (updateCols.isEmpty()) {
+                clauses += if (updateCols.isEmpty()) {
                     // Nothing to update — degrade gracefully to DO NOTHING
                     AtomicClause("DO NOTHING")
                 } else {
@@ -133,7 +181,7 @@ class PostgresDialect(
             }
         }
 
-        return base
+        return clauses
     }
 
     // ─────────────────────────────────────────────────────────────────────────
