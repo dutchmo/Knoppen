@@ -10,6 +10,7 @@ import org.austindroids.knoppen.datafile.TextValidator
 import org.austindroids.knoppen.schema.DatabaseSchema
 import org.austindroids.knoppen.schema.DefaultType
 import org.austindroids.knoppen.schema.OnConflictAction
+import org.austindroids.knoppen.schema.OnConflictConfig
 import org.austindroids.knoppen.schema.TableSchema
 import org.slf4j.LoggerFactory
 import tools.jackson.databind.JsonNode
@@ -39,19 +40,18 @@ interface ColumnGenerator {
  * filesystem, merges multi-file tables, runs structural and FK validation, then
  * produces SQL statements in dependency order.
  *
+ * Each table's rows are grouped into multi-row `INSERT ... VALUES (...), (...) ...`
+ * batches per that table's [TableSchema.batchSize] — `1` (the default) preserves
+ * the original one-statement-per-row behavior exactly; `0` means no size limit
+ * (as many rows as possible per statement, see [chunkRows] for the ON CONFLICT
+ * splitting caveat); any other positive value caps each batch at that many rows.
+ *
  * Returns a [GenerationResult] containing any errors and, when there are no
  * hard errors, the generated SQL statements.
  */
 class UpsertGenerator(
     private val dbSchema: DatabaseSchema,
-    private val dialect: SqlDialect,
-    /**
-     * Rows per table are grouped into batches of this size and generated as one
-     * multi-row `INSERT ... VALUES (...), (...) ...` statement per batch. `1`
-     * (the default) preserves the original one-statement-per-row behavior
-     * exactly. Hardcoded for now — not yet exposed via CLI/Mojo/schema.
-     */
-    private val multiRowBatchSize: Int = 1
+    private val dialect: SqlDialect
 ) {
     companion object {
         private val log = LoggerFactory.getLogger(UpsertGenerator::class.java)
@@ -495,7 +495,7 @@ class UpsertGenerator(
                 dataRow
             }
 
-            if (multiRowBatchSize <= 1) {
+            if (tableSchema.batchSize == 1) {
                 resolvedRows.forEachIndexed { rowIndex, dataRow ->
                     val sql = dialect.generateUpsert(dataRow)
                     statements.add(GenerationResult.NamedStatement(tableSchema.tableName, rowIndex..rowIndex, sql))
@@ -548,7 +548,9 @@ class UpsertGenerator(
     private data class RowChunk(val range: IntRange, val rows: List<DataRow>)
 
     /**
-     * Splits [resolvedRows] into batches of at most [multiRowBatchSize] rows.
+     * Splits [resolvedRows] into batches of at most [TableSchema.batchSize] rows.
+     * A `batchSize` of `0` means no size limit — a batch only ever splits due to
+     * the conflict-key rule below, never due to row count.
      *
      * When [TableSchema.onConflict]'s action is `UPDATE`, a batch is also split
      * early whenever the next row's conflict-target key already appears earlier
@@ -558,10 +560,21 @@ class UpsertGenerator(
      * though Knoppen intentionally allows such duplicates across rows (each was
      * previously its own successful sequential upsert). `DO NOTHING` has no such
      * restriction, so no splitting is needed for it.
+     *
+     * When conflicts are targeted by [OnConflictConfig.constraint] rather than
+     * [OnConflictConfig.target], Knoppen has no column list to key on (it doesn't
+     * introspect the database to learn what the named constraint covers). Rather
+     * than risk generating a batch that fails this Postgres restriction at execution
+     * time, [conflictKeyOf] on an empty target list yields the *same* key ("") for
+     * every row, which — combined with the "split when key already seen" rule below
+     * — forces every row into its own single-row batch. This degrades silently to
+     * one-statement-per-row (safe, but no batching benefit); see
+     * `SemanticValidator`'s warning for this combination.
      */
     private fun chunkRows(tableSchema: TableSchema, resolvedRows: List<DataRow>): List<RowChunk> {
-        val splitOnConflictKey = tableSchema.onConflict?.action == OnConflictAction.UPDATE
-        val conflictTarget     = tableSchema.onConflict?.target.orEmpty()
+        val batchSize           = tableSchema.batchSize
+        val splitOnConflictKey  = tableSchema.onConflict?.action == OnConflictAction.UPDATE
+        val conflictTarget      = tableSchema.onConflict?.target.orEmpty()
 
         val chunks       = mutableListOf<RowChunk>()
         var currentChunk = mutableListOf<IndexedValue<DataRow>>()
@@ -577,7 +590,8 @@ class UpsertGenerator(
 
         resolvedRows.forEachIndexed { index, row ->
             val key = if (splitOnConflictKey) conflictKeyOf(row, conflictTarget) else null
-            val mustSplit = currentChunk.size >= multiRowBatchSize || (key != null && key in seenKeys)
+            val sizeLimitReached = batchSize > 0 && currentChunk.size >= batchSize
+            val mustSplit = sizeLimitReached || (key != null && key in seenKeys)
             if (mustSplit) flush()
             currentChunk.add(IndexedValue(index, row))
             if (key != null) seenKeys.add(key)

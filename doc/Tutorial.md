@@ -13,7 +13,9 @@ Knoppen reads a YAML schema describing your tables and a set of data files (YAML
    - 4.1 [Root Fields](#41-root-fields)
    - 4.2 [Validation Configuration](#42-validation-configuration)
    - 4.3 [Table Definition](#43-table-definition)
+     - 4.3.1 [Multi-Row Batching](#431-multi-row-batching)
    - 4.4 [Column Definition](#44-column-definition)
+     - 4.4.1 [Column-Level Conflict Merge Strategy](#441-column-level-conflict-merge-strategy)
    - 4.5 [Column Types](#45-column-types)
    - 4.6 [Default Values](#46-default-values)
    - 4.7 [Constraints](#47-constraints)
@@ -185,10 +187,10 @@ tables:
       - orders_extra.csv
     outputFile: orders.sql
     primaryKey: [id]
+    batchSize: 100
     onConflict:
       target: [id]
       action: update
-      excludeFromUpdate: [id, created_at]
     columns:
       - ...
 ```
@@ -202,8 +204,40 @@ tables:
 | `dataFiles`   | array of strings | No       | Data file paths for this table. Each path is resolved against `rootDataPath` and must exist. A table with an empty (or omitted) `dataFiles` list is skipped entirely (logged at DEBUG). |     |
 | `outputFile`  | string           | No       | SQL output file name for this table, resolved against `rootOutputPath`. Defaults to `<tableName>.sql` if omitted. If two or more tables declare the same `outputFile`, their generated statements are merged into that one file (logged at DEBUG). |     |
 | `primaryKey`  | array of strings | Yes      | One or more column names forming the primary key. Used for duplicate PK detection across files.                                 |     |
+| `batchSize`   | integer          | No       | Rows per multi-row `INSERT ... VALUES (...), (...)` statement (see §4.3.1). Default `1` = one statement per row. `0` = no limit. |     |
 | `onConflict`  | object           | No       | Conflict-resolution strategy (see §4.9). If omitted, a plain `INSERT` is generated with no conflict clause.                     |     |
 | `columns`     | array            | Yes      | Column definitions (at least one required).                                                                                     |     |
+
+#### 4.3.1 Multi-Row Batching
+
+By default (`batchSize: 1`, or the field omitted entirely) Knoppen emits one `INSERT ... ON CONFLICT ...` statement per row — this is the original, byte-for-byte behavior and remains the default. Setting `batchSize` to a value greater than `1` groups that many rows into a single multi-row statement instead:
+
+```yaml
+primaryKey: [id]
+batchSize: 100
+onConflict:
+  target: [id]
+  action: update
+```
+
+```sql
+INSERT INTO "my_schema"."orders" ("id", "amount", "status")
+VALUES
+    (1, 99.99, 'active'),
+    (2, 149.00, 'active'),
+    (3, 25.50, 'pending')
+ON CONFLICT ("id") DO UPDATE SET
+    "amount" = EXCLUDED."amount",
+    "status" = EXCLUDED."status";
+```
+
+A `batchSize` of `0` means **no limit** — Knoppen packs as many rows as possible into a single statement for that table, splitting only when required (see below). Fewer, larger statements reduce round-trips when loading large seed files; the tradeoff is a larger single statement to review or roll back.
+
+**Conflict-key splitting.** Regardless of `batchSize`, a batch is always split early if the *same* conflict-target key would appear twice within one statement — PostgreSQL rejects `INSERT ... ON CONFLICT DO UPDATE` when two rows in the same statement target the same conflict key ("ON CONFLICT DO UPDATE command cannot affect row a second time"). Knoppen intentionally allows duplicate conflict keys *across* rows in a data file (each row is a valid sequential upsert on its own — see the ON CONFLICT UPDATE exercises throughout this tutorial), so batching detects this case and starts a new statement instead of generating SQL that would fail at execution time. `action: doNothing` has no such restriction, since `DO NOTHING` never re-touches an already-affected row.
+
+**Column-presence mismatches.** Every row in the same batch must agree on which columns are present (columns backed by a schema `default` are always present regardless of the row's own data, so only no-default, no-value columns can disagree). If two rows in the same batch disagree, Knoppen reports a hard error identifying the offending column and table rather than generating a statement with a ragged column list.
+
+**`onConflict.constraint` and batching.** Conflict-key splitting (above) needs a column list to build a key from. If the table targets conflicts by `constraint` instead of `target` (see §4.9), Knoppen has no such list and falls back to splitting before every row — safe, but with no batching benefit for that table. See §4.9's "Batching caveat" for details.
 
 ### 4.4 Column Definition
 
@@ -228,6 +262,88 @@ columns:
 | `default`     | object | No | Default value applied when the data file omits the column (see §4.6). |  
 | `foreignKey`  | object | No | FK reference to a parent table (see §4.8). |  
 | `constraints` | array | No | Validation constraints applied to the column's data values (see §4.7). |  
+| `onConflict`  | string | No | Per-column `DO UPDATE SET` merge strategy (see §4.4.1). One of `OVERWRITE` (default), `PRESERVE`, `COALESCE`, `COMPUTED`. |  
+
+#### 4.4.1 Column-Level Conflict Merge Strategy
+
+Each column independently controls how it behaves in the `DO UPDATE SET` clause of an upsert via `onConflict`:
+
+```yaml
+columns:
+  - name: description
+    datatype: TEXT
+    onConflict: COALESCE   # new value wins unless it's NULL
+```
+
+| Strategy | Rendered SQL | Semantics |
+|----------|--------------|-----------|
+| `OVERWRITE` (default) | `col = EXCLUDED.col` | The new value always wins, replacing whatever was there — the ordinary case, and the default when `onConflict` is omitted. |
+| `PRESERVE` | *(column omitted from `SET` entirely)* | The old value always wins; the column is never touched by a conflict update. Use this for immutable fields like `created_at` or a surrogate key that isn't the PK. |
+| `COALESCE` | `col = COALESCE(EXCLUDED.col, "table"."col")` | The new value wins **unless it's `NULL`**, in which case the existing value is kept. Useful for partial/sparse re-seeds where a missing field shouldn't blank out data that's already there. |
+| `COMPUTED` | `col = <rendered default>` | The column's own `default` (see §4.6 — `FUNCTION`, `EXPRESSION`, or `LITERAL` only, not `GENERATOR` or `AUTO`) is re-rendered and applied unconditionally, ignoring `EXCLUDED` entirely. Useful for an `updated_at` column that should always advance to `NOW()` on every conflict, regardless of what the incoming row carries. Requires the column to declare a `default`. |
+
+> **Table reference inside `COALESCE`**: the pre-conflict row is referenced via the table's bare (unqualified) name — e.g. `"gadget"."status"`, never `"my_schema"."gadget"."status"` — even when the table itself is schema-qualified in the `INSERT INTO` clause. PostgreSQL exposes the conflict target under its bare name inside `DO UPDATE SET` unless an explicit alias is used.
+
+**Primary key columns are always omitted from `DO UPDATE SET`**, regardless of their `onConflict` value — re-assigning a row's own key on conflict is never meaningful. This is automatic; you do not need to mark PK columns `PRESERVE`.
+
+**A compound `onConflict.target` that is *not* the primary key is not automatically excluded.** For example, if `onConflict.target` is a unique key `[post_id, approver_id]` distinct from the table's actual `primaryKey: [id]`, then `post_id` and `approver_id` are ordinary columns as far as `DO UPDATE SET` is concerned — mark them `onConflict: PRESERVE` explicitly if you don't want them reassigned to their own (unchanged) value:
+
+```yaml
+primaryKey: [id]
+onConflict:
+  target: [post_id, approver_id]   # compound unique — not the PK
+  action: update
+
+columns:
+  - name: post_id
+    onConflict: PRESERVE           # conflict target, not the PK — mark explicitly
+  - name: approver_id
+    onConflict: PRESERVE
+  - name: decided_ts
+    onConflict: PRESERVE           # preserve the original decision timestamp
+```
+
+**Example — mixing strategies on one table:**
+
+```yaml
+columns:
+  - name: id
+    datatype: INTEGER
+    # PK — always omitted from SET automatically, no onConflict needed
+
+  - name: created_at
+    datatype: TIMESTAMP
+    onConflict: PRESERVE
+    default:
+      kind: FUNCTION
+      value: CURRENT_TIMESTAMP
+
+  - name: updated_at
+    datatype: TIMESTAMP
+    onConflict: COMPUTED
+    default:
+      kind: FUNCTION
+      value: CURRENT_TIMESTAMP
+
+  - name: notes
+    datatype: TEXT
+    onConflict: COALESCE
+
+  - name: status
+    datatype: VARCHAR(20)
+    # onConflict omitted -> OVERWRITE
+```
+
+Generates, on conflict:
+
+```sql
+ON CONFLICT ("id") DO UPDATE SET
+    "updated_at" = CURRENT_TIMESTAMP,
+    "notes" = COALESCE(EXCLUDED."notes", "my_table"."notes"),
+    "status" = EXCLUDED."status";
+```
+
+Note `id` and `created_at` are absent from the `SET` clause entirely — `id` because it's the PK (automatic), `created_at` because it's marked `PRESERVE`.
 
 ### 4.5 Column Datatypes
 
@@ -256,7 +372,7 @@ A `default` block describes how to fill a column when the data file row does not
 
 ```yaml  
 default:  
-  kind: LITERAL | FUNCTION | EXPRESSION | GENERATOR  
+  kind: LITERAL | FUNCTION | EXPRESSION | GENERATOR | AUTO
   value: "..."  
   args: []        # only used by FUNCTION kind  
 ```  
@@ -267,6 +383,7 @@ default:
 | `FUNCTION`   | Unquoted SQL function call | `CURRENT_TIMESTAMP` | `CURRENT_TIMESTAMP` |  
 | `EXPRESSION` | Raw SQL expression, rendered as-is | `'[]'::jsonb` | `'[]'::jsonb` |  
 | `GENERATOR`  | Evaluated in Kotlin per row before SQL is built | `SEQUENCE(10,10)` | e.g. `10`, `20`, `30` |  
+| `AUTO`       | *(column omitted entirely — no `value`)* | — | Column is left out of the INSERT and `DO UPDATE SET` entirely; the database supplies it |  
 
 **LITERAL** is useful for fixed string or numeric defaults:
 ```yaml  
@@ -297,6 +414,40 @@ default:
 ```  
 
 > **Data file override**: If a data file row includes a value for a column that has a `GENERATOR` default, the data file value takes precedence. The generator is only invoked when the column is absent from the row.
+
+**AUTO** marks a column as entirely the database's responsibility — an identity/`SERIAL` column, a `DEFAULT` expression declared in the DDL, or a value populated by a trigger. Knoppen never emits `NEXTVAL(...)` or manages sequences itself; `AUTO` is how you tell Knoppen to simply stay out of the way for a column the database already knows how to fill in:
+
+```yaml
+- name: id
+  datatype: BIGINT
+  default:
+    kind: AUTO
+  constraints:
+    - constraint: REQUIRED
+
+- name: created_at
+  datatype: TIMESTAMP
+  default:
+    kind: AUTO       # populated by a trigger
+```
+
+`id` and `created_at` are both dropped from the generated `INSERT` column list, the `VALUES` list, and the `DO UPDATE SET` clause — for every row, unconditionally:
+
+```sql
+INSERT INTO "blog"."article" ("title", "status")
+VALUES ('Introduction to Databases', 'PUBLISHED')
+ON CONFLICT ("id") DO UPDATE SET
+    "title" = EXCLUDED."title",
+    "status" = EXCLUDED."status";
+```
+
+A few things worth knowing about `AUTO`:
+
+- **No `value` field.** Unlike the other four kinds, `AUTO` carries no `value` — just `kind: AUTO`. Any `args` or `value` present alongside it are ignored.
+- **`REQUIRED` still works.** An `AUTO` column may also carry a `REQUIRED` constraint — that documents that the column is `NOT NULL` in the database, without requiring the data file to supply a value. Knoppen never flags a missing value on an `AUTO` column as a `REQUIRED` violation; filling it in is the database's job, not the data file's.
+- **Supplying a value is an error.** If a data file row explicitly sets a value for an `AUTO` column, Knoppen rejects it: `Column 'id' is marked AUTO but row supplies value '5'`. This mirrors PostgreSQL's `GENERATED ALWAYS` semantics — if you need per-row control over the value, use a `GENERATOR` default instead (see §5), which *is* allowed to be overridden per row.
+- **Omitted from `DO UPDATE SET` too, unconditionally.** An `AUTO` column never appears in a conflict update, regardless of its `onConflict` merge strategy (see §4.4.1) — there's no need to (and no point in) marking an `AUTO` column `PRESERVE`.
+- **Multi-file caveat for an `AUTO` primary key.** Cross-file duplicate-PK detection (see §6.4) compares each row's primary key value. If the primary key is itself `AUTO`, every row's PK reads as absent, so rows from different files spanning the same table can't be distinguished by PK alone. If a table's primary key is `AUTO`, prefer a single data file for it, or drive `ON CONFLICT` off a separate real unique column instead.
 
 ### 4.7 Constraints
 
@@ -398,21 +549,53 @@ The `onConflict` block controls how PostgreSQL handles a row that conflicts with
 
 ```yaml  
 onConflict:  
-  target: [id]              # column(s) in ON CONFLICT (...) clause  action: update            # or doNothing  excludeFromUpdate:        # columns never overwritten on conflict    - id    - created_at  
+  target: [id]     # column(s) in ON CONFLICT (...) clause
+  action: update   # or doNothing
 ```  
 
 | Field | DataType | Required | Description |  
 |-------|----------|----------|-------------|  
-| `target` | array    | Yes | Column(s) used in `ON CONFLICT (col, ...)`. Usually the PK, but can be a unique constraint. |  
-| `action` | string   | Yes | `update` → `DO UPDATE SET ...` for every non-excluded column. `doNothing` → `DO NOTHING`. |  
-| `excludeFromUpdate` | array    | No | Columns omitted from the `DO UPDATE SET` clause. Use this to protect immutable fields like creation timestamps or surrogate PKs. |  
+| `target` | array    | One of `target`/`constraint` | Column(s) used in `ON CONFLICT (col, ...)`. Usually the PK, but can be a unique constraint. Mutually exclusive with `constraint`. |  
+| `constraint` | string   | One of `target`/`constraint` | A named constraint used in `ON CONFLICT ON CONSTRAINT "name"` instead of a column list. Mutually exclusive with `target`. See below. |  
+| `action` | string   | Yes | `update` → `DO UPDATE SET ...` for every column not marked `onConflict: PRESERVE`. `doNothing` → `DO NOTHING`. |  
+
+Exactly one of `target` or `constraint` must be present — schema meta-validation rejects both being set, or neither.
+
+Which individual columns are updated, preserved, merged, or recomputed on conflict is controlled per-column, not here — see §4.4.1 for the full `onConflict: OVERWRITE | PRESERVE | COALESCE | COMPUTED` reference.
+
+**Targeting by constraint name.** PostgreSQL's `ON CONFLICT` clause supports two forms: a column list (`ON CONFLICT (col, ...)`) or a named constraint (`ON CONFLICT ON CONSTRAINT "name"`). Use `constraint` instead of `target` when the conflict should be resolved against a specific named constraint rather than an inferred column list — useful when a table has more than one unique constraint that could apply, or when you'd rather pin to a constraint name than repeat its column list:
+
+```yaml
+onConflict:
+  constraint: users_pkey
+  action: doNothing
+```
+
+Generates:
+```sql
+INSERT INTO "my_schema"."users" ("id", "username")
+VALUES (1, 'alice')
+ON CONFLICT ON CONSTRAINT "users_pkey" DO NOTHING;
+```
+
+> **Batching caveat**: Knoppen doesn't introspect the database, so when `constraint` is used it has no column list to build a per-row conflict key from for multi-row duplicate-key detection (see §4.3.1). Combined with `action: update` and a `batchSize` other than `1`, this degrades safely but silently to one statement per row — Knoppen will never risk generating a batch that fails at execution time, but you also won't get the batching benefit. Schema validation emits a warning for this combination. Prefer `target` over `constraint` whenever you also want multi-row batching with `action: update`; `constraint` composes without caveats when paired with `action: doNothing` (the most common pairing — see the example above), since `DO NOTHING` never has the duplicate-key restriction in the first place.
 
 **Example: protect created_at and id on conflict:**
 ```yaml  
 onConflict:  
   target: [id]  
   action: update  
-  excludeFromUpdate: [id, created_at]  
+
+columns:
+  - name: id
+    datatype: INTEGER
+  - name: created_at
+    datatype: TIMESTAMP
+    onConflict: PRESERVE
+  - name: amount
+    datatype: NUMERIC(8,2)
+  - name: status
+    datatype: VARCHAR(20)
 ```  
 Generates:
 ```sql  
@@ -421,13 +604,19 @@ VALUES (42, 99.99, CURRENT_TIMESTAMP, 'active')
 ON CONFLICT ("id") DO UPDATE SET  
   "amount" = EXCLUDED."amount",  "status" = EXCLUDED."status"  
 ```  
-Note `id` and `created_at` are absent from the `DO UPDATE SET` clause.
+Note `id` and `created_at` are absent from the `DO UPDATE SET` clause — `id` because it's the primary key (always automatic), `created_at` because it's marked `onConflict: PRESERVE`.
 
-**Conflict target vs primary key**: The `target` does not have to match `primaryKey`. You can point it at a unique constraint column instead:
+**Conflict target vs primary key**: The `target` does not have to match `primaryKey`. You can point it at a unique constraint column instead — but remember that a `target` column which is *not* the primary key needs its own `onConflict: PRESERVE` if you don't want it reassigned to its own value (see §4.4.1):
 ```yaml  
 primaryKey: [id]  
 onConflict:  
-  target: [email]     # unique constraint on email, not the PK  action: update  excludeFromUpdate: [id, email]  
+  target: [email]     # unique constraint on email, not the PK
+  action: update
+
+columns:
+  - name: email
+    datatype: VARCHAR(255)
+    onConflict: PRESERVE   # conflict target, not the PK — mark explicitly
 ```  
   
 ---  
@@ -1077,10 +1266,6 @@ tables:
     onConflict:
       target: [id]
       action: update
-      excludeFromUpdate:
-        - id
-        - category_id
-        - created_at
 
     columns:
       - name: id
@@ -1090,6 +1275,7 @@ tables:
 
       - name: category_id
         datatype: INTEGER
+        onConflict: PRESERVE   # an article never changes category on a re-seed conflict
         foreignKey:
           table: category
           columns: [id]
@@ -1117,6 +1303,7 @@ tables:
 
       - name: created_at
         datatype: TIMESTAMP
+        onConflict: PRESERVE   # never overwrite the original creation timestamp
         default:
           kind: FUNCTION
           value: CURRENT_TIMESTAMP
@@ -1156,7 +1343,7 @@ tables:
   status: "PUBLISHED"  
 # ── Conflict row: update title of article 1002 ────  
 - id: 1002  
-  category_id: 2                    # preserved (excludeFromUpdate)  title: "The Science of Sleep - Revised"  status: "PUBLISHED"  
+  category_id: 2                    # preserved (onConflict: PRESERVE)  title: "The Science of Sleep - Revised"  status: "PUBLISHED"  
 ```  
 
 ### Step 5: Validate
@@ -1181,6 +1368,16 @@ knoppen generate schemas/blog.yaml --root-output-path /tmp/blog_seed
 psql -h localhost -U myuser -d mydb -f /tmp/blog_seed/category.sql
 psql -h localhost -U myuser -d mydb -f /tmp/blog_seed/article.sql
 ```  
+
+> This walkthrough keeps `id` explicit in the data files to keep the FK relationship
+> between `article.category_id` and `category.id` easy to follow. If `category.id`
+> were instead database-assigned (`default: { kind: AUTO }`, see §4.6), `article` rows
+> would have no value to reference until after `category.sql` ran and the database
+> chose the IDs — for a real auto-increment PK referenced by FK, either capture the
+> generated IDs from the database before generating dependent rows, or seed both
+> tables through natural (non-surrogate) keys instead. See also §4.3.1 for batching
+> multiple rows per `INSERT` (`batchSize`) once you're loading more than a handful
+> of rows per table.
   
 ---  
 
@@ -1195,7 +1392,7 @@ psql -h localhost -U myuser -d mydb -f /tmp/blog_seed/article.sql
 - **Upsert-only.** Knoppen generates `INSERT ... ON CONFLICT` statements. It does not generate `UPDATE`-only statements, `DELETE` statements, or DDL (`CREATE TABLE`, `ALTER TABLE`, etc.).
 - **No transaction wrapping.** The output file is a plain list of statements with no `BEGIN`/`COMMIT`.
 - **No `RETURNING` clause.** Generated IDs or timestamps are not captured.
-- **No sequences or identity columns.** Knoppen does not issue `NEXTVAL(...)` or use `DEFAULT` for auto-increment columns. Primary key values must be explicit in the data file or produced by a `GENERATOR`.
+- **No `NEXTVAL(...)` or sequence management.** Knoppen never issues `NEXTVAL(...)` itself. A primary key (or any column) backed by a database identity/`SERIAL`/sequence-backed `DEFAULT` or a trigger should be marked `default: { kind: AUTO }` (see §4.6) so Knoppen omits it from the generated SQL entirely and leaves it to the database. Explicit values (data file or `GENERATOR`) remain the only two ways to supply a value *from* Knoppen.
 
 ### Data Files
 
@@ -1203,6 +1400,7 @@ psql -h localhost -U myuser -d mydb -f /tmp/blog_seed/article.sql
 - **Plain list format required.** YAML files must use a bare list at the top level. The legacy `tableName: [...]` wrapper is tolerated for compatibility but will not be supported indefinitely.
 - **CSV type coercion is simple.** Empty strings become `null`; `true`/`false` become booleans; integer-shaped strings become integers; decimal-shaped strings become doubles. There is no way to force a specific type in CSV — use YAML or JSON if you need finer control.
 - **No CSV quoting for commas in values.** The CSV parser follows standard quoting rules (`"value with, comma"`), but complex multi-line CSV values may not parse correctly.
+- **Cross-file duplicate-PK detection can't see an `AUTO` primary key.** Since an `AUTO` column is never present in row data, every row's primary key reads as absent — rows for the same table spread across multiple files can't be distinguished by PK. Prefer a single data file per table when the PK is `AUTO` (see §4.6).
 
 ### Foreign Key Validation
 
@@ -1224,7 +1422,8 @@ psql -h localhost -U myuser -d mydb -f /tmp/blog_seed/article.sql
 - **DataType strings** must be uppercase: `INTEGER`, `VARCHAR(30)`, `NUMERIC(8,2)`. Lowercase datatypes like `int` or `varchar(30)` will fail JSON schema validation.
 - **No schema inheritance or includes.** Each schema file is fully self-contained. There is no way to share a common base schema between multiple schema files.
 - **Cyclic FK dependencies** cause an immediate error with no partial output.
-- **`onConflict` is all-or-nothing.** You cannot define per-column conflict-resolution logic beyond `excludeFromUpdate`. There is no support for `DO UPDATE SET col = col + EXCLUDED.col` style expressions.
+- **Column-level conflict merge is limited to four named strategies.** `onConflict: OVERWRITE | PRESERVE | COALESCE | COMPUTED` (see §4.4.1) covers "new value wins," "never touch," "keep old value on NULL," and "always recompute the default." There is no `GREATEST`/`LEAST`, arithmetic accumulation (`col = col + EXCLUDED.col`), array/JSONB append (`col = col || EXCLUDED.col`), or arbitrary custom SQL expression per column.
+- **`onConflict.constraint` disables multi-row batching's safety-net optimization.** Knoppen doesn't introspect the database, so it can't learn which columns a named constraint covers. Paired with `action: update` and `batchSize != 1`, this degrades safely to one statement per row rather than risk a batch that fails at execution time (see §4.3.1 and §4.9). Use `onConflict.target` instead when you need real multi-row batching with `action: update`.
 
 ### Validation
 

@@ -38,14 +38,15 @@ data class TableSchema(
     val outputFile: String? = null,                 // SQL output file name relative to rootOutputPath; defaults to "<tableName>.sql"
     val primaryKey: List<String>,                   // List of column names forming the PK
     val onConflict: OnConflictConfig? = null,
+    val batchSize: Int = 1,                          // Rows per multi-row INSERT statement; 1 = one statement per row (default); 0 = no limit
     val columns: List<ColumnSchema>
 )
 
 @Serializable
 data class OnConflictConfig(
-    val target: List<String>,                       // Columns used in ON CONFLICT (...) clause
-    val action: OnConflictAction,                   // DO UPDATE or DO NOTHING
-    val excludeFromUpdate: List<String> = emptyList() // Columns never oveorwritten on conflict
+    val target: List<String>? = null,                // Columns used in ON CONFLICT (...) clause — mutually exclusive with constraint
+    val constraint: String? = null,                  // Named constraint used in ON CONFLICT ON CONSTRAINT ... — mutually exclusive with target
+    val action: OnConflictAction                     // DO UPDATE or DO NOTHING
 )
 
 @Serializable
@@ -64,10 +65,24 @@ data class ColumnSchema(
     val datatype: String,                           // Raw type string e.g. "VARCHAR(30)", "NUMERIC(8,2)"
     val default: DefaultValue? = null,              // Matches YAML key "default" (not "defaultValue")
     val foreignKey: ForeignKeyConfig? = null,
-    val constraints: List<ColumnConstraint> = emptyList()
+    val constraints: List<ColumnConstraint> = emptyList(),
+    val onConflict: OnConflictMerge = OnConflictMerge.OVERWRITE // Per-column DO UPDATE SET strategy
     // Note: nullable is NOT stored per-column — it is derived at runtime from
     // ValidationConfig.defaultNullable + presence of a "required" constraint
 )
+
+/**
+ * Per-column strategy for the `DO UPDATE SET` clause of an upsert. Primary key
+ * columns are always omitted from the SET clause regardless of this value —
+ * see [PostgresDialect][org.austindroids.knoppen.sqlgen.dialect.PostgresDialect].
+ */
+@Serializable
+enum class OnConflictMerge {
+    OVERWRITE, // col = EXCLUDED.col — new value always wins (default)
+    PRESERVE,  // omitted from SET entirely — old value always wins
+    COALESCE,  // col = COALESCE(EXCLUDED.col, table.col) — new value wins unless NULL
+    COMPUTED   // col = <rendered column default> — ignores EXCLUDED, e.g. NOW(); requires a non-GENERATOR `default`
+}
 
 // ============================================================
 // Default Values
@@ -76,7 +91,7 @@ data class ColumnSchema(
 @Serializable
 data class DefaultValue(
     val kind: DefaultType,
-    val value: String,                              // Always required — the literal, function name, or expression
+    val value: String = "",                         // The literal value, function name, or expression — unused for AUTO
     val args: List<String> = emptyList()            // Optional function arguments e.g. for NOW(precision)
 )
 
@@ -85,7 +100,8 @@ enum class DefaultType {
     @SerialName("LITERAL")    LITERAL,             // Plain string/number literal — rendered quoted in SQL
     @SerialName("FUNCTION")   FUNCTION,            // SQL function call — rendered unquoted e.g. CURRENT_TIMESTAMP
     @SerialName("EXPRESSION") EXPRESSION,           // Arbitrary SQL expression — rendered as-is e.g. '[]'::jsonb
-    @SerialName("GENERATOR")  GENERATOR     // Resolved in Kotlin per-row at generation time
+    @SerialName("GENERATOR")  GENERATOR,    // Resolved in Kotlin per-row at generation time
+    @SerialName("AUTO")       AUTO          // Column omitted entirely from INSERT/UPDATE — left to the database
 }
 
 // ============================================================

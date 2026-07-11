@@ -1,7 +1,7 @@
 
 
 ON conflict on constraint
-nextval('generic_code_id_seq')
+or use `DEFAULT` for auto-increment columns. Primary key values must be explicit in the data file or produced by a `GENERATOR`.
 
 
 - **One table per file.** Each data file maps to exactly one table. A file cannot contain rows for multiple tables.
@@ -15,8 +15,11 @@ nextval('generic_code_id_seq')
 kotlin Context Parameters
 If a class needs a dependency for its entire lifetime, give it a constructor parameter. Context parameters are for things that vary per call chain, not per instan
 
+Noop updates
 License
 Tutorial stylesheet
+
+---
 
 Java Include/rust
 ADK

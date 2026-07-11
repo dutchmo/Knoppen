@@ -1,0 +1,54 @@
+# ============================================================
+# Minimal fixture — DefaultType.AUTO (see AutoColumnTest).
+#
+# id and created_at are database-assigned (identity column / trigger) and
+# must never appear in the generated INSERT column list, VALUES list, or
+# DO UPDATE SET clause. Conflict detection instead targets the "name"
+# column, which carries a real UNIQUE constraint.
+# ============================================================
+
+dialect: postgresql
+schema: auto_test
+rootDataPath: ../data
+
+validation:
+  defaultNullable: true
+  strictFields: false
+
+tables:
+  - tableName: gadget
+    description: "Exercises DefaultType.AUTO — DB-assigned id and created_at"
+    dataFiles:
+      - gadget.yaml
+    primaryKey: [id]
+
+    onConflict:
+      target: [name]
+      action: update
+
+    columns:
+      - name: id
+        datatype: BIGINT
+        default:
+          kind: AUTO
+        constraints:
+          - constraint: REQUIRED
+
+      - name: name
+        datatype: VARCHAR(50)
+        onConflict: PRESERVE            # conflict target, not the PK -- must be marked explicitly
+        constraints:
+          - constraint: REQUIRED
+          - constraint: UNIQUE
+            conflictTarget: true
+
+      - name: status
+        datatype: VARCHAR(20)
+        default:
+          kind: LITERAL
+          value: "ACTIVE"
+
+      - name: created_at
+        datatype: TIMESTAMP
+        default:
+          kind: AUTO

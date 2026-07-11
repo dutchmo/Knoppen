@@ -2,7 +2,7 @@
 # ----------------------------------------------
 # users
 # Exercises:
-#   - ON CONFLICT UPDATE with excludeFromUpdate
+#   - ON CONFLICT UPDATE with a column marked onConflict: PRESERVE (createTs)
 #   - LITERAL default  (source)
 #   - FUNCTION default (createTs)
 #   - EXPRESSION default (metadata)
@@ -26,7 +26,7 @@
 
 # -- ON CONFLICT UPDATE exercise -----------------------
 # id: 2 already exists. Action is UPDATE.
-# createTs must NOT change (excludeFromUpdate).
+# createTs must NOT change (onConflict: PRESERVE).
 # type and approvedTs will be updated.
 - id: 2
   username: "bob"

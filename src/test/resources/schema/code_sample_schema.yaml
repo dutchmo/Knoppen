@@ -82,9 +82,6 @@ tables:
     onConflict:
       target: [id]
       action: update
-      excludeFromUpdate:
-        - id
-        - createTs
 
     columns:
       - name: id
@@ -111,6 +108,7 @@ tables:
 
       - name: createTs
         datatype: TIMESTAMP
+        onConflict: PRESERVE
         default:
           kind: FUNCTION
           value: CURRENT_TIMESTAMP
@@ -151,9 +149,6 @@ tables:
     onConflict:
       target: [id]
       action: update
-      excludeFromUpdate:
-        - id
-        - user_id
 
     columns:
       - name: id
@@ -163,6 +158,7 @@ tables:
 
       - name: user_id
         datatype: INTEGER
+        onConflict: PRESERVE
         foreignKey:
           schema: code_sample
           table: users
@@ -303,11 +299,6 @@ tables:
     onConflict:
       target: [post_id, approver_id]   # compound unique — not the PK
       action: update
-      excludeFromUpdate:
-        - id
-        - post_id
-        - approver_id
-        - decided_ts                    # preserve original decision timestamp
 
     columns:
       - name: id
@@ -317,6 +308,7 @@ tables:
 
       - name: post_id
         datatype: INTEGER
+        onConflict: PRESERVE            # conflict target, not the PK — must be marked explicitly
         foreignKey:
           schema: code_sample
           table: post
@@ -326,6 +318,7 @@ tables:
 
       - name: approver_id
         datatype: INTEGER
+        onConflict: PRESERVE            # conflict target, not the PK — must be marked explicitly
         foreignKey:
           schema: code_sample
           table: users
@@ -343,6 +336,7 @@ tables:
 
       - name: decided_ts
         datatype: TIMESTAMP
+        onConflict: PRESERVE            # preserve original decision timestamp
         default:
           kind: FUNCTION
           value: CURRENT_TIMESTAMP

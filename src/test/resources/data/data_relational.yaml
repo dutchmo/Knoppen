@@ -20,7 +20,7 @@ tables:
   # ──────────────────────────────────────────────
   # users
   # Exercises:
-  #   - ON CONFLICT UPDATE with excludeFromUpdate
+  #   - ON CONFLICT UPDATE with a column marked onConflict: PRESERVE (createTs)
   #   - LITERAL default  (source)
   #   - FUNCTION default (createTs)
   #   - EXPRESSION default (metadata)
@@ -60,7 +60,7 @@ tables:
 
     # ── ON CONFLICT UPDATE exercise ───────────────────────
     # id: 2 already exists. Action is UPDATE.
-    # createTs must NOT change (excludeFromUpdate).
+    # createTs must NOT change (onConflict: PRESERVE).
     # type and approvedTs will be updated.
     - id: 2
       username: "bob"
@@ -81,7 +81,7 @@ tables:
   # post
   # Exercises:
   #   - FK → users (user_id must exist in users rows above)
-  #   - ON CONFLICT UPDATE with excludeFromUpdate (user_id preserved)
+  #   - ON CONFLICT UPDATE with onConflict: PRESERVE (user_id preserved)
   #   - SEQUENCE generator (column_order)
   #   - pattern constraint (title)
   # ──────────────────────────────────────────────
@@ -119,10 +119,10 @@ tables:
     # ── ON CONFLICT UPDATE exercise ───────────────────────
     # id: 101 already exists.
     # percent_approved will be updated.
-    # user_id must NOT change (excludeFromUpdate).
+    # user_id must NOT change (onConflict: PRESERVE).
     # title will be updated.
     - id: 101
-      user_id: 9999             # ignored — user_id is in excludeFromUpdate
+      user_id: 9999             # ignored — user_id is onConflict: PRESERVE
       title: "Advanced Indexing Strategies - Revised"
       percent_approved: 92.00
       # column_order generated: 60 (new value for this upsert — will update)
@@ -251,7 +251,7 @@ tables:
   # post_approval
   # Exercises:
   #   - ON CONFLICT on compound UNIQUE (post_id, approver_id) — NOT the PK
-  #   - excludeFromUpdate: decided_ts preserved on conflict
+  #   - onConflict: PRESERVE on decided_ts (preserved on conflict)
   #   - FOREIGN_CYCLE: post_id cycles through post.id [100..104]
   #   - FOREIGN_CYCLE: approver_id cycles through users.id [1..5]
   #     (all users can be approvers here for coverage)
@@ -298,11 +298,11 @@ tables:
     # (post_id: 101, approver_id: 2) matches row id: 2001.
     # Conflict target is (post_id, approver_id) — not id.
     # decision WILL be updated (REJECTED → APPROVED).
-    # decided_ts WILL NOT change (excludeFromUpdate).
-    # id WILL NOT change (excludeFromUpdate).
-    - id: 9999                  # ignored — id is in excludeFromUpdate
+    # decided_ts WILL NOT change (onConflict: PRESERVE).
+    # id WILL NOT change (primary key, always omitted from DO UPDATE SET).
+    - id: 9999                  # ignored — id is the primary key
       post_id: 101
       approver_id: 2
       decision: "APPROVED"      # updated from REJECTED
-      decided_ts: "2099-01-01 00:00:00+00"  # ignored — decided_ts is in excludeFromUpdate
+      decided_ts: "2099-01-01 00:00:00+00"  # ignored — decided_ts is onConflict: PRESERVE
       # column_order generated: 60 (will update — not excluded)

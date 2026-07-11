@@ -2,7 +2,7 @@
 # post
 # Exercises:
 #   - FK -> users (user_id must exist in users rows above)
-#   - ON CONFLICT UPDATE with excludeFromUpdate (user_id preserved)
+#   - ON CONFLICT UPDATE with onConflict: PRESERVE (user_id preserved)
 #   - SEQUENCE generator (column_order)
 #   - pattern constraint (title)
 # ----------------------------------------------
@@ -39,7 +39,7 @@
 # -- ON CONFLICT UPDATE exercise -----------------------
 # id: 101 already exists.
 # percent_approved will be updated.
-# user_id must NOT change (excludeFromUpdate).
+# user_id must NOT change (onConflict: PRESERVE).
 # title will be updated.
 - id: 101
   user_id: 2             # user_id: 9999 was changed to valid user_id 2 for FK validation

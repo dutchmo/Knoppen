@@ -6,8 +6,11 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 import io.kotest.matchers.string.shouldNotContain
 import org.austindroids.knoppen.schema.ColumnSchema
+import org.austindroids.knoppen.schema.DefaultType
+import org.austindroids.knoppen.schema.DefaultValue
 import org.austindroids.knoppen.schema.OnConflictAction
 import org.austindroids.knoppen.schema.OnConflictConfig
+import org.austindroids.knoppen.schema.OnConflictMerge
 import org.austindroids.knoppen.schema.SqlType
 import org.austindroids.knoppen.schema.TableSchema
 import org.austindroids.knoppen.sqlgen.DataRow
@@ -75,17 +78,98 @@ class PostgresDialectTest : FunSpec({
         sql shouldContain "DO NOTHING"
     }
 
-    test("upsert with empty update columns degrades to DO NOTHING") {
+    test("upsert with onConflict.constraint renders ON CONFLICT ON CONSTRAINT") {
+        val schema = usersSchema.copy(
+            onConflict = OnConflictConfig(constraint = "users_pkey", action = OnConflictAction.UPDATE)
+        )
+        val sql = PostgresDialect(FormatConfig.SINGLE_LINE).generateUpsert(usersRow(schema))
+        sql shouldBe "INSERT INTO app.users (\"id\", \"name\", \"email\") " +
+            "VALUES (42, 'Alice', 'a@b.com') " +
+            "ON CONFLICT ON CONSTRAINT \"users_pkey\" " +
+            "DO UPDATE SET \"name\" = EXCLUDED.\"name\", \"email\" = EXCLUDED.\"email\";"
+    }
+
+    test("onConflict.constraint takes precedence over target when both are set") {
         val schema = usersSchema.copy(
             onConflict = OnConflictConfig(
                 target = listOf("id"),
-                action = OnConflictAction.UPDATE,
-                excludeFromUpdate = listOf("name", "email")
+                constraint = "users_pkey",
+                action = OnConflictAction.DO_NOTHING
             )
+        )
+        val sql = PostgresDialect(FormatConfig.SINGLE_LINE).generateUpsert(usersRow(schema))
+        sql shouldContain "ON CONFLICT ON CONSTRAINT \"users_pkey\""
+        sql shouldNotContain "ON CONFLICT (id)"
+    }
+
+    test("upsert with empty update columns degrades to DO NOTHING") {
+        val schema = usersSchema.copy(
+            columns = usersSchema.columns.map { col ->
+                if (col.name in setOf("name", "email")) col.copy(onConflict = OnConflictMerge.PRESERVE) else col
+            }
         )
         val sql = PostgresDialect(FormatConfig.TRADITIONAL).generateUpsert(usersRow(schema))
         sql shouldContain "DO NOTHING"
         sql shouldNotContain "DO UPDATE SET"
+    }
+
+    test("upsert with PRESERVE on one column omits it but updates the rest") {
+        val schema = usersSchema.copy(
+            columns = usersSchema.columns.map { col ->
+                if (col.name == "email") col.copy(onConflict = OnConflictMerge.PRESERVE) else col
+            }
+        )
+        val sql = PostgresDialect(FormatConfig.SINGLE_LINE).generateUpsert(usersRow(schema))
+        sql shouldContain "DO UPDATE SET \"name\" = EXCLUDED.\"name\";"
+        sql shouldNotContain "\"email\" = EXCLUDED.\"email\""
+    }
+
+    test("upsert with COALESCE merges against the pre-conflict row, unqualified table name") {
+        val schema = usersSchema.copy(
+            columns = usersSchema.columns.map { col ->
+                if (col.name == "email") col.copy(onConflict = OnConflictMerge.COALESCE) else col
+            }
+        )
+        val sql = PostgresDialect(FormatConfig.SINGLE_LINE).generateUpsert(usersRow(schema))
+        sql shouldContain "\"email\" = COALESCE(EXCLUDED.\"email\", \"users\".\"email\")"
+    }
+
+    test("upsert with COMPUTED re-renders the column default and ignores EXCLUDED") {
+        val schema = usersSchema.copy(
+            columns = usersSchema.columns.map { col ->
+                if (col.name == "email") col.copy(
+                    onConflict = OnConflictMerge.COMPUTED,
+                    default = DefaultValue(kind = DefaultType.FUNCTION, value = "CURRENT_TIMESTAMP")
+                ) else col
+            }
+        )
+        val sql = PostgresDialect(FormatConfig.SINGLE_LINE).generateUpsert(usersRow(schema))
+        sql shouldContain "\"email\" = CURRENT_TIMESTAMP"
+        sql shouldNotContain "\"email\" = EXCLUDED"
+    }
+
+    test("PK column is always omitted from SET regardless of its onConflict strategy") {
+        val schema = usersSchema.copy(
+            columns = usersSchema.columns.map { col ->
+                if (col.name == "id") col.copy(onConflict = OnConflictMerge.COALESCE) else col
+            }
+        )
+        val sql = PostgresDialect(FormatConfig.SINGLE_LINE).generateUpsert(usersRow(schema))
+        sql shouldNotContain "\"id\" = "
+    }
+
+    test("AUTO column is omitted from columns, VALUES, and DO UPDATE SET even though the row supplies a value") {
+        val schema = usersSchema.copy(
+            columns = usersSchema.columns.map { col ->
+                if (col.name == "email") col.copy(default = DefaultValue(kind = DefaultType.AUTO)) else col
+            }
+        )
+        // usersRow() always includes "email" — proves AUTO wins even when the row supplies a value.
+        val sql = PostgresDialect(FormatConfig.SINGLE_LINE).generateUpsert(usersRow(schema))
+        sql shouldBe "INSERT INTO app.users (\"id\", \"name\") " +
+            "VALUES (42, 'Alice') " +
+            "ON CONFLICT (id) " +
+            "DO UPDATE SET \"name\" = EXCLUDED.\"name\";"
     }
 
     test("default constructor (LEGACY preset) matches pre-formatter behaviour") {
@@ -146,6 +230,32 @@ class PostgresDialectTest : FunSpec({
         Regex("ON CONFLICT").findAll(sql).count() shouldBe 1
         Regex("DO UPDATE SET").findAll(sql).count() shouldBe 1
         Regex("""\(\d, 'User\d', 'u\d@b\.com'\)""").findAll(sql).count() shouldBe 5
+    }
+
+    test("multi-row upsert renders COALESCE once for the whole batch") {
+        val schema = usersSchema.copy(
+            columns = usersSchema.columns.map { col ->
+                if (col.name == "email") col.copy(onConflict = OnConflictMerge.COALESCE) else col
+            }
+        )
+        val sql = PostgresDialect(FormatConfig.SINGLE_LINE)
+            .generateMultiRowUpsert(listOf(usersRow(schema), bobRow(schema)))
+        sql shouldContain "\"email\" = COALESCE(EXCLUDED.\"email\", \"users\".\"email\")"
+        Regex("COALESCE").findAll(sql).count() shouldBe 1
+    }
+
+    test("multi-row upsert also omits an AUTO column from columns, VALUES, and DO UPDATE SET") {
+        val schema = usersSchema.copy(
+            columns = usersSchema.columns.map { col ->
+                if (col.name == "email") col.copy(default = DefaultValue(kind = DefaultType.AUTO)) else col
+            }
+        )
+        val sql = PostgresDialect(FormatConfig.SINGLE_LINE)
+            .generateMultiRowUpsert(listOf(usersRow(schema), bobRow(schema)))
+        sql shouldBe "INSERT INTO app.users (\"id\", \"name\") " +
+            "VALUES (42, 'Alice'), (43, 'Bob') " +
+            "ON CONFLICT (id) " +
+            "DO UPDATE SET \"name\" = EXCLUDED.\"name\";"
     }
 
     test("generateMultiRowUpsert rejects rows from different tables") {

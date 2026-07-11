@@ -8,6 +8,7 @@ import java.time.format.DateTimeParseException
 
 import org.austindroids.knoppen.schema.ColumnSchema
 import org.austindroids.knoppen.schema.DatabaseSchema
+import org.austindroids.knoppen.schema.DefaultType
 import org.austindroids.knoppen.schema.EnumConstraint
 import org.austindroids.knoppen.schema.PatternConstraint
 import org.austindroids.knoppen.schema.RequiredConstraint
@@ -32,9 +33,10 @@ import tools.jackson.databind.node.StringNode
  *
  * Checks performed per row:
  *  1. Unknown fields — WARNING (escalated to ERROR when [org.austindroids.knoppen.schema.ValidationConfig.strictFields] is true)
- *  2. Required fields present and non-null — ERROR
- *  3. Type compatibility — ERROR
- *  4. Per-column constraints (enum, pattern, temporal, unique) — ERROR or WARNING
+ *  2. AUTO columns must not be supplied a value — ERROR
+ *  3. Required fields present and non-null — ERROR
+ *  4. Type compatibility — ERROR
+ *  5. Per-column constraints (enum, pattern, temporal, unique) — ERROR or WARNING
  *
  * In-memory uniqueness is tracked across all supplied rows for columns with
  * [UniqueConstraint]. Database-level uniqueness (existing rows) is not checked here.
@@ -118,12 +120,20 @@ class DataFileValidator(
     ) {
         val line = lineIndex.lineFor(rowIndex, col.name)
 
+        if (col.default?.kind == DefaultType.AUTO && value != null && !value.isNull) {
+            addError(rowIndex, col.name, line,
+                "Column '${col.name}' is marked AUTO but row supplies value '${value.asString()}'" +
+                        " — AUTO columns are left entirely to the database and must be omitted from data files")
+            return
+        }
+
         val isRequired = col.constraints.any { it is RequiredConstraint }
 
         if (value == null || value.isNull) {
-            // A declared default (LITERAL/FUNCTION/EXPRESSION/GENERATOR) guarantees a
-            // value will be filled in later by UpsertGenerator.buildAllStatements, so a
-            // missing/null raw value isn't actually a violation of REQUIRED here.
+            // A declared default (LITERAL/FUNCTION/EXPRESSION/GENERATOR/AUTO) guarantees a
+            // value will be filled in later — by UpsertGenerator.buildAllStatements for the
+            // first four, or by the database itself for AUTO — so a missing/null raw value
+            // isn't actually a violation of REQUIRED here.
             if (isRequired && col.default == null) {
                 addError(rowIndex, col.name, line,
                     "Field '${col.name}' is required but is missing or null")

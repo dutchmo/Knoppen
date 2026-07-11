@@ -1,0 +1,10 @@
+# id and created_at are never supplied -- both are AUTO (database-assigned).
+- name: "widget-a"
+  status: "ACTIVE"
+
+- name: "widget-b"
+  # status omitted -> LITERAL default 'ACTIVE'
+
+# -- ON CONFLICT UPDATE exercise: same name as widget-a --
+- name: "widget-a"
+  status: "RETIRED"

@@ -7,7 +7,12 @@ import tools.jackson.databind.JsonNode
  *
  *  - primaryKey columns must exist in the columns list
  *  - onConflict.target columns must exist in the columns list
- *  - onConflict.excludeFromUpdate columns must exist in the columns list
+ *  - onConflict.constraint + action: update + a non-default batchSize has no batching
+ *    benefit, since Knoppen can't introspect the constraint's columns (warning)
+ *  - a column's onConflict: COMPUTED requires a non-GENERATOR default
+ *  - a column's onConflict strategy on a primaryKey column is a no-op (warning)
+ *  - a column's onConflict strategy is a no-op when the table's onConflict.action is doNothing (warning)
+ *  - a column's onConflict strategy is a no-op on an AUTO-defaulted column (warning)
  *  - foreignKey.table must reference a table defined in this schema file
  *  - temporal notPast must be a valid ISO 8601 negative duration
  *  - enum constraint values list must not contain duplicates
@@ -34,6 +39,10 @@ class SemanticValidator {
             val columnNames = table.path("columns")
                 .mapNotNull { it.path("name").asString(null) }
                 .toSet()
+            val primaryKeyColumns = table.path("primaryKey")
+                .mapNotNull { it.asString(null) }
+                .toSet()
+            val tableOnConflictAction = table.path("onConflict").path("action").asString(null)
 
             validatePrimaryKey(context, table, tablePath, tableName, columnNames)
             validateOnConflict(context, table, tablePath, tableName, columnNames)
@@ -45,6 +54,7 @@ class SemanticValidator {
                 validateForeignKey(context, column, colPath, colName, knownTables)
                 validateConstraints(context, column, colPath, colName)
                 validateDefault(context, column, colPath, colName, columnNames, tables)
+                validateColumnOnConflict(context, column, colPath, colName, primaryKeyColumns, tableOnConflictAction)
             }
         }
     }
@@ -96,27 +106,75 @@ class SemanticValidator {
             }
         }
 
-        // excludeFromUpdate columns must exist
-        onConflict.path("excludeFromUpdate").forEachIndexed { idx, col ->
-            val colName = col.asString()
-            if (colName !in columnNames) {
+        // constraint-based targeting has no column list for UpsertGenerator to key on
+        // when splitting multi-row batches on duplicate conflict values (see chunkRows()
+        // in UpsertGenerator.kt) — batching silently degrades to one-statement-per-row
+        val usesConstraint = !onConflict.path("constraint").isMissingNode
+        val action = onConflict.path("action").asString(null)
+        val batchSize = table.path("batchSize").asInt(1)
+        if (usesConstraint && action == "update" && batchSize != 1) {
+            context.warning(
+                "$conflictPath/constraint",
+                "Table '$tableName': onConflict.constraint with action 'update' and batchSize" +
+                        " $batchSize has no batching benefit — Knoppen cannot determine which columns" +
+                        " the named constraint covers, so every row is forced into its own statement" +
+                        " regardless of batchSize. Use onConflict.target instead if you need a real" +
+                        " conflict-key check for batching."
+            )
+        }
+    }
+
+    // ── Column-level onConflict merge strategy ──────────────────────────────────
+
+    private fun validateColumnOnConflict(
+        context: RuleContext,
+        column: JsonNode,
+        colPath: String,
+        colName: String,
+        primaryKeyColumns: Set<String>,
+        tableOnConflictAction: String?
+    ) {
+        val strategy = column.path("onConflict").asString(null) ?: return  // default OVERWRITE — nothing to check
+        val onConflictPath = "$colPath/onConflict"
+        val defaultKind = column.path("default").path("kind").asString(null)
+
+        if (strategy == "COMPUTED") {
+            val default = column.path("default")
+            if (default.isMissingNode) {
                 context.error(
-                    "$conflictPath/excludeFromUpdate/$idx",
-                    "Table '$tableName': onConflict.excludeFromUpdate references column '$colName'" +
-                            " which is not defined in columns"
+                    onConflictPath,
+                    "Column '$colName': onConflict: COMPUTED requires a 'default' to render on conflict"
+                )
+            } else if (defaultKind == "GENERATOR") {
+                context.error(
+                    onConflictPath,
+                    "Column '$colName': onConflict: COMPUTED cannot be combined with a GENERATOR default" +
+                            " — GENERATOR values are resolved per-row before SQL generation, not re-rendered on conflict"
                 )
             }
         }
 
-        // Warn if action is "update" but excludeFromUpdate is empty —
-        // almost certainly the PK and create timestamps should be excluded
-        val action = onConflict.path("action").asString()
-        val excludeCount = onConflict.path("excludeFromUpdate").size()
-        if (action == "update" && excludeCount == 0) {
+        if (strategy != "OVERWRITE" && colName in primaryKeyColumns) {
             context.warning(
-                "$conflictPath/excludeFromUpdate",
-                "Table '$tableName': onConflict.action is 'update' but excludeFromUpdate is empty." +
-                        " Consider excluding PK and audit timestamp columns."
+                onConflictPath,
+                "Column '$colName': onConflict: $strategy has no effect — primary key columns are never" +
+                        " included in DO UPDATE SET"
+            )
+        }
+
+        if (strategy != "OVERWRITE" && tableOnConflictAction == "doNothing") {
+            context.warning(
+                onConflictPath,
+                "Column '$colName': onConflict: $strategy has no effect — table's onConflict.action is" +
+                        " 'doNothing', so no DO UPDATE SET clause is ever generated"
+            )
+        }
+
+        if (strategy != "OVERWRITE" && defaultKind == "AUTO") {
+            context.warning(
+                onConflictPath,
+                "Column '$colName': onConflict: $strategy has no effect — AUTO-defaulted columns are" +
+                        " always omitted from both INSERT and DO UPDATE SET"
             )
         }
     }
@@ -274,6 +332,8 @@ class SemanticValidator {
         if (default.isMissingNode) return
 
         val type = default.path("kind").asString(null) ?: return  // structural catches missing
+        if (type == "AUTO") return  // AUTO carries no value/args to validate
+
         val value = default.path("value").asString(null)
 
         if (value.isNullOrBlank()) {

@@ -4,6 +4,8 @@ import org.austindroids.knoppen.schema.ColumnSchema
 import org.austindroids.knoppen.schema.DefaultType
 import org.austindroids.knoppen.schema.DefaultValue
 import org.austindroids.knoppen.schema.OnConflictAction
+import org.austindroids.knoppen.schema.OnConflictConfig
+import org.austindroids.knoppen.schema.OnConflictMerge
 import org.austindroids.knoppen.schema.SqlType
 import org.austindroids.knoppen.schema.TableSchema
 import org.austindroids.knoppen.sqlgen.DataRow
@@ -29,8 +31,19 @@ import java.time.format.DateTimeFormatter
  *  - Column and table names are always double-quoted to handle reserved words
  *    and mixed-case identifiers safely.
  *  - The schema qualifier is prepended when present on the TableSchema.
- *  - Columns in onConflict.excludeFromUpdate are omitted from the DO UPDATE SET clause.
+ *  - The conflict target is `ON CONFLICT (col, ...)` when [OnConflictConfig.target] is
+ *    declared, or `ON CONFLICT ON CONSTRAINT "name"` when [OnConflictConfig.constraint]
+ *    is declared instead — see [conflictTargetClause].
+ *  - Each column's DO UPDATE SET fragment is driven by its [ColumnSchema.onConflict]
+ *    strategy: OVERWRITE (`col = EXCLUDED.col`), PRESERVE (omitted from SET entirely),
+ *    COALESCE (`col = COALESCE(EXCLUDED.col, table.col)`), or COMPUTED (re-renders the
+ *    column's `default`, ignoring EXCLUDED). Primary key columns are always omitted
+ *    from SET regardless of their strategy.
  *  - Column defaults are applied when the data row omits a column entirely.
+ *  - Columns whose default is [DefaultType.AUTO] are omitted entirely — from the
+ *    INSERT column list, the VALUES list, and (as a consequence, since both are
+ *    driven from the same resolved column list) DO UPDATE SET. The database is
+ *    solely responsible for populating them (identity, DEFAULT, or trigger).
  *
  * Layout (line breaks, indentation, comma placement) is delegated to
  * [SqlFormatter] via [config]; this class only builds the semantic
@@ -48,7 +61,6 @@ class PostgresDialect(
 
     override fun generateUpsert(row: DataRow): String {
         val schema        = row.schema
-        val excludeSet     = schema.onConflict?.excludeFromUpdate?.toSet() ?: emptySet()
         val insertColumns = resolveInsertColumns(schema, row)
 
         require(insertColumns.isNotEmpty()) {
@@ -62,7 +74,7 @@ class PostgresDialect(
             ItemizedClause("INSERT INTO ${tableRef(schema)}", columns, parens = true),
             ItemizedClause("VALUES", values, parens = true)
         )
-        clauses += buildConflictClauses(schema, insertColumns, excludeSet)
+        clauses += buildConflictClauses(schema, insertColumns)
         return formatter.format(clauses)
     }
 
@@ -73,7 +85,6 @@ class PostgresDialect(
             "generateMultiRowUpsert requires all rows to belong to the same table " +
                 "(got: ${rows.map { it.schema.tableName }.distinct()})"
         }
-        val excludeSet     = schema.onConflict?.excludeFromUpdate?.toSet() ?: emptySet()
         val insertColumns = resolveInsertColumns(schema, rows.first())
 
         require(insertColumns.isNotEmpty()) {
@@ -98,7 +109,7 @@ class PostgresDialect(
             ItemizedClause("INSERT INTO ${tableRef(schema)}", columns, parens = true),
             RowValuesClause("VALUES", rowTuples)
         )
-        clauses += buildConflictClauses(schema, insertColumns, excludeSet)
+        clauses += buildConflictClauses(schema, insertColumns)
         return formatter.format(clauses)
     }
 
@@ -111,11 +122,16 @@ class PostgresDialect(
      * the row OR have a default defined. Columns with neither are omitted (they
      * will get DB-level DEFAULT/NULL). GENERATOR columns are always resolved
      * before this point and will be present in [DataRow.fields] — they must
-     * never fall through to [renderDefault].
+     * never fall through to [renderDefault]. AUTO columns are unconditionally
+     * excluded — even if [row] happens to carry a value for one (data-file
+     * validation is expected to have already rejected that as an error before
+     * SQL generation runs; this filter is a defensive backstop, not the
+     * primary enforcement point).
      */
     private fun resolveInsertColumns(schema: TableSchema, row: DataRow): List<ColumnSchema> =
         schema.columns.filter { col ->
-            row.fields.containsKey(col.name) || (col.default != null && col.default.kind != DefaultType.GENERATOR)
+            col.default?.kind != DefaultType.AUTO &&
+                (row.fields.containsKey(col.name) || (col.default != null && col.default.kind != DefaultType.GENERATOR))
         }
 
     /** Formats [row]'s values for each of [insertColumns], in order. */
@@ -143,8 +159,7 @@ class PostgresDialect(
      */
     private fun buildConflictClauses(
         schema: TableSchema,
-        insertColumns: List<ColumnSchema>,
-        excludeSet: Set<String>
+        insertColumns: List<ColumnSchema>
     ): List<Clause> {
         val clauses = mutableListOf<Clause>()
         val onConflict = schema.onConflict
@@ -157,25 +172,23 @@ class PostgresDialect(
             return clauses
         }
 
-        val targetList = onConflict.target.joinToString(", ")
-        clauses += AtomicClause("ON CONFLICT ($targetList)")
+        clauses += AtomicClause(conflictTargetClause(schema, onConflict))
 
         when (onConflict.action) {
             OnConflictAction.DO_NOTHING ->
                 clauses += AtomicClause("DO NOTHING")
 
             OnConflictAction.UPDATE -> {
-                // Update all inserted columns except excluded ones and the PK
+                // The PK is always the identity of the row and is never re-assigned on
+                // conflict, regardless of a column's declared onConflict strategy.
                 val pkSet = schema.primaryKey.toSet()
-                val updateCols = insertColumns
-                    .map { it.name }
-                    .filter { it !in excludeSet && it !in pkSet }
+                val updateCols = insertColumns.filter { it.name !in pkSet && it.onConflict != OnConflictMerge.PRESERVE }
 
                 clauses += if (updateCols.isEmpty()) {
                     // Nothing to update — degrade gracefully to DO NOTHING
                     AtomicClause("DO NOTHING")
                 } else {
-                    val setClauses = updateCols.map { col -> "${qq(col)} = EXCLUDED.${qq(col)}" }
+                    val setClauses = updateCols.map { col -> renderSetClause(schema, col) }
                     ItemizedClause("DO UPDATE SET", setClauses)
                 }
             }
@@ -183,6 +196,45 @@ class PostgresDialect(
 
         return clauses
     }
+
+    /**
+     * Renders the conflict target portion of the `ON CONFLICT` clause: either
+     * `ON CONFLICT ON CONSTRAINT "name"` when [OnConflictConfig.constraint] is set,
+     * or `ON CONFLICT (col, ...)` when [OnConflictConfig.target] is set. `constraint`
+     * takes precedence if both are somehow set (schema meta-validation rejects that
+     * combination via `oneOf` before this is ever reached in practice).
+     */
+    private fun conflictTargetClause(schema: TableSchema, onConflict: OnConflictConfig): String =
+        when {
+            onConflict.constraint != null -> "ON CONFLICT ON CONSTRAINT ${qq(onConflict.constraint)}"
+            onConflict.target != null     -> "ON CONFLICT (${onConflict.target.joinToString(", ")})"
+            else -> throw IllegalStateException(
+                "Table '${schema.tableName}': onConflict must declare either 'target' or 'constraint'"
+            )
+        }
+
+    /** Renders one column's `DO UPDATE SET` fragment per its [ColumnSchema.onConflict] strategy. */
+    private fun renderSetClause(schema: TableSchema, col: ColumnSchema): String {
+        val name = qq(col.name)
+        return when (col.onConflict) {
+            OnConflictMerge.OVERWRITE -> "$name = EXCLUDED.$name"
+            OnConflictMerge.COALESCE  -> "$name = COALESCE(EXCLUDED.$name, ${conflictRowRef(schema)}.$name)"
+            OnConflictMerge.COMPUTED  -> "$name = ${renderDefault(col.default!!, SqlType.parse(col.datatype))}"
+            OnConflictMerge.PRESERVE  -> throw IllegalStateException(
+                "Column '${col.name}' with onConflict: PRESERVE reached renderSetClause() — " +
+                        "PRESERVE columns must be filtered out of updateCols before this point."
+            )
+        }
+    }
+
+    /**
+     * References the pre-conflict row inside a `DO UPDATE SET` expression (e.g. for
+     * [OnConflictMerge.COALESCE]). Postgres implicitly exposes the target table under
+     * its own bare (unqualified) name unless an `INSERT INTO t AS alias` is used — the
+     * schema-qualified form used by [tableRef] for the `INSERT INTO` clause is not
+     * valid here.
+     */
+    private fun conflictRowRef(schema: TableSchema): String = qq(schema.tableName)
 
     // ─────────────────────────────────────────────────────────────────────────
     // Value formatting
@@ -270,6 +322,12 @@ class PostgresDialect(
      *    [DataRow.fields] before [generateUpsert] is called. If one does
      *    reach here it means the generator was not wired up correctly.
      *
+     *  - [DefaultType.AUTO] should NEVER reach here either — AUTO columns are
+     *    excluded from [resolveInsertColumns] entirely, so [formatRowValues]
+     *    never calls this for one. It is only reached via [renderSetClause]'s
+     *    `COMPUTED` branch, and `COMPUTED` on an AUTO column is unreachable by
+     *    construction (AUTO columns never appear in `updateCols`).
+     *
      *  - [DefaultType.FUNCTION]   → rendered unquoted, e.g. CURRENT_TIMESTAMP
      *  - [DefaultType.EXPRESSION] → rendered as-is,    e.g. '[]'::jsonb
      *  - [DefaultType.LITERAL]    → rendered quoted,   e.g. 'active'
@@ -287,6 +345,11 @@ class PostgresDialect(
                         "— generator values must be resolved by UpsertGenerator before " +
                         "generateUpsert() is called. Check that the column is included in " +
                         "the generators map and that GeneratorParser.parse() was invoked for it."
+            )
+            DefaultType.AUTO -> throw IllegalStateException(
+                "AUTO default for column '${sqlType.toDdl()}' reached renderDefault() — AUTO columns " +
+                        "must be entirely excluded from the INSERT column/value lists and can never be " +
+                        "the target of an onConflict: COMPUTED strategy."
             )
         }
 
