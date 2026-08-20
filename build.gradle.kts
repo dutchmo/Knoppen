@@ -100,7 +100,11 @@ kotlin {
     jvmToolchain(24)
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
-        freeCompilerArgs.addAll("-Xjsr305=strict", "-Xcollection-literals", "-Xreturn-value-checker=full")
+        freeCompilerArgs.addAll("-Xjsr305=strict",
+            "-Xcollection-literals",
+            "-Xreturn-value-checker=full",
+            "-Xname-based-destructuring=only-syntax",)
+            //"-Xname-based-destructuring=complete",)
     }
 }
 
